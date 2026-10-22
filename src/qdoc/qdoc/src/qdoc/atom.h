@@ -4,7 +4,8 @@
 #ifndef ATOM_H
 #define ATOM_H
 
-#include "node.h"
+#include "genustypes.h"
+#include "location.h"
 
 #include <QtCore/qdebug.h>
 #include <QtCore/qstringlist.h>
@@ -35,6 +36,8 @@ public:
         ComparesRight,
         DetailsLeft,
         DetailsRight,
+        DetailsSummaryLeft,
+        DetailsSummaryRight,
         DivLeft,
         DivRight,
         ExampleFileLink,
@@ -98,8 +101,11 @@ public:
         TableRowRight,
         TableItemLeft,
         TableItemRight,
-        TableOfContents,
+        TableOfContentsLeft,
+        TableOfContentsRight,
         Target,
+        TitleLeft,
+        TitleRight,
         UnhandledFormat,
         WarningLeft,
         WarningRight,
@@ -141,7 +147,7 @@ public:
     Atom *next() { return m_next; }
     void setNext(Atom *newNext) { m_next = newNext; }
 
-    [[nodiscard]] const Atom *find(AtomType t) const;
+    [[nodiscard]] const Atom *find(AtomType t, qsizetype *offset = nullptr) const;
     [[nodiscard]] const Atom *find(AtomType t, const QString &s) const;
     [[nodiscard]] const Atom *next() const { return m_next; }
     [[nodiscard]] const Atom *next(AtomType t) const;
@@ -155,9 +161,10 @@ public:
     [[nodiscard]] const QStringList &strings() const { return m_strs; }
 
     [[nodiscard]] virtual bool isLinkAtom() const { return false; }
-    virtual Node::Genus genus() { return Node::DontCare; }
+    virtual Genus genus() { return Genus::DontCare; }
     virtual Tree *domain() { return nullptr; }
-    virtual void resolveSquareBracketParams() {}
+    virtual void resolveSquareBracketParams(const QString &) {}
+    virtual int flags() const { return 0; }
 
 protected:
     Atom *m_next = nullptr;
@@ -169,37 +176,38 @@ class LinkAtom : public Atom
 {
 public:
     LinkAtom(const QString &p1, const QString &p2, Location location = Location());
+    LinkAtom(Atom::AtomType type, const QString &p1, const QString &p2,
+             Location location = Location());
     LinkAtom(const LinkAtom &t);
     LinkAtom(Atom *previous, const LinkAtom &t);
     ~LinkAtom() override = default;
 
     [[nodiscard]] bool isLinkAtom() const override { return true; }
-    Node::Genus genus() override
+    Genus genus() override
     {
-        resolveSquareBracketParams();
         return m_genus;
     }
     Tree *domain() override
     {
-        resolveSquareBracketParams();
         return m_domain;
     }
-    void resolveSquareBracketParams() override;
+    void resolveSquareBracketParams(const QString &text) override;
+    virtual int flags() const override;
 
 public:
     Location location;
 
 protected:
-    bool m_resolved {};
-    Node::Genus m_genus {};
+    Genus m_genus {};
     Tree *m_domain {};
-    QString m_squareBracketParams {};
+    QStringList m_squareBracketParams {};
 };
 
 #define ATOM_FORMATTING_BOLD "bold"
 #define ATOM_FORMATTING_INDEX "index"
 #define ATOM_FORMATTING_ITALIC "italic"
 #define ATOM_FORMATTING_LINK "link"
+#define ATOM_FORMATTING_NOTRANSLATE "notranslate"
 #define ATOM_FORMATTING_PARAMETER "parameter"
 #define ATOM_FORMATTING_SPAN "span "
 #define ATOM_FORMATTING_SUBSCRIPT "subscript"

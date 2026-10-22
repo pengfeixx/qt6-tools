@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #include "layoutinfo_p.h"
 
@@ -21,6 +22,7 @@ using namespace Qt::StringLiterals;
 
 namespace qdesigner_internal {
 /*!
+  \internal
   \overload
 */
 LayoutInfo::Type LayoutInfo::layoutType(const QDesignerFormEditorInterface *core, const QLayout *layout)
@@ -61,6 +63,7 @@ QString LayoutInfo::layoutName(Type t)
 }
 
 /*!
+  \internal
   \overload
 */
 LayoutInfo::Type LayoutInfo::layoutType(const QDesignerFormEditorInterface *core, const QWidget *w)

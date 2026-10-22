@@ -18,6 +18,8 @@
 #include <functional>
 #include <memory>
 
+QT_BEGIN_NAMESPACE
+
 class DocumentContainerPrivate;
 class DocumentContainerContextPrivate;
 
@@ -47,12 +49,30 @@ public: // outside API
     void setDocument(const QByteArray &data, DocumentContainerContext *context);
     bool hasDocument() const;
     void setBaseUrl(const QString &url);
+    QString baseUrl() const;
     void setScrollPosition(const QPoint &pos);
     void render(int width, int height);
     void draw(QPainter *painter, const QRect &clip);
     int documentWidth() const;
     int documentHeight() const;
     int anchorY(const QString &anchorName) const;
+
+    enum class MediaType
+    {
+        None,
+        All,
+        Screen,
+        Print,
+        Braille,
+        Embossed,
+        Handheld,
+        Projection,
+        Speech,
+        TTY,
+        TV
+    };
+
+    void setMediaType(MediaType t);
 
     // these return areas to redraw in document space
     QVector<QRect> mousePressEvent(const QPoint &documentPos,
@@ -87,6 +107,7 @@ public: // outside API
 
     using DataCallback = std::function<QByteArray(QUrl)>;
     void setDataCallback(const DataCallback &callback);
+    DataCallback dataCallback() const;
 
     using CursorCallback = std::function<void(QCursor)>;
     void setCursorCallback(const CursorCallback &callback);
@@ -96,6 +117,7 @@ public: // outside API
 
     using PaletteCallback = std::function<QPalette()>;
     void setPaletteCallback(const PaletteCallback &callback);
+    PaletteCallback paletteCallback() const;
 
     using ClipboardCallback = std::function<void(bool)>;
     void setClipboardCallback(const ClipboardCallback &callback);
@@ -105,3 +127,5 @@ public: // outside API
 private:
     std::unique_ptr<DocumentContainerPrivate> d;
 };
+
+QT_END_NAMESPACE

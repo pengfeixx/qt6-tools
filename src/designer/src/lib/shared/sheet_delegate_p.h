@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 //
 //  W A R N I N G
@@ -18,7 +19,7 @@
 
 #include "shared_global_p.h"
 
-#include <QtWidgets/qitemdelegate.h>
+#include <QtWidgets/qstyleditemdelegate.h>
 #include <QtWidgets/qtreeview.h>
 
 QT_BEGIN_NAMESPACE
@@ -27,7 +28,7 @@ class QTreeView;
 
 namespace qdesigner_internal {
 
-class QDESIGNER_SHARED_EXPORT SheetDelegate: public QItemDelegate
+class QDESIGNER_SHARED_EXPORT SheetDelegate: public QStyledItemDelegate
 {
     Q_OBJECT
 public:

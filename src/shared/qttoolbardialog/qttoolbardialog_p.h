@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 //
 //  W A R N I N G
@@ -15,7 +16,7 @@
 #ifndef QTTOOLBARDIALOG_H
 #define QTTOOLBARDIALOG_H
 
-#include <QtWidgets/QDialog>
+#include <QtWidgets/qdialog.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -30,8 +31,8 @@ class QtToolBarManager : public QObject
     Q_OBJECT
 public:
 
-    explicit QtToolBarManager(QObject *parent = 0);
-    ~QtToolBarManager();
+    explicit QtToolBarManager(QObject *parent = nullptr);
+    ~QtToolBarManager() override;
 
     void setMainWindow(QMainWindow *mainWindow);
     QMainWindow *mainWindow() const;
@@ -62,8 +63,8 @@ class QtToolBarDialog : public QDialog
     Q_OBJECT
 public:
 
-    explicit QtToolBarDialog(QWidget *parent = 0, Qt::WindowFlags flags = {});
-    ~QtToolBarDialog();
+    explicit QtToolBarDialog(QWidget *parent = nullptr, Qt::WindowFlags flags = {});
+    ~QtToolBarDialog() override;
 
     void setToolBarManager(QtToolBarManager *toolBarManager);
 

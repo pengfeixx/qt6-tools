@@ -3,7 +3,7 @@
 
 #include "atom.h"
 
-#include "location.h"
+#include "genustypes.h"
 #include "qdocdatabase.h"
 
 #include <QtCore/qregularexpression.h>
@@ -52,6 +52,8 @@ QT_BEGIN_NAMESPACE
   \value CodeQuoteCommand
   \value DetailsLeft
   \value DetailsRight
+  \value DetailsSummaryLeft
+  \value DetailsSummaryRight
   \value DivLeft
   \value DivRight
   \value ExampleFileLink
@@ -107,7 +109,8 @@ QT_BEGIN_NAMESPACE
   \value TableRowRight
   \value TableItemLeft
   \value TableItemRight
-  \value TableOfContents
+  \value TableOfContentsLeft
+  \value TableOfContentsRight
   \value Target
   \value UnhandledFormat
   \value UnknownCommand
@@ -134,6 +137,8 @@ static const struct
              { "ComparesRight", Atom::ComparesRight },
              { "DetailsLeft", Atom::DetailsLeft },
              { "DetailsRight", Atom::DetailsRight },
+             { "DetailsSummaryLeft", Atom::DetailsSummaryLeft },
+             { "DetailsSummaryRight", Atom::DetailsSummaryRight },
              { "DivLeft", Atom::DivLeft },
              { "DivRight", Atom::DivRight },
              { "ExampleFileLink", Atom::ExampleFileLink },
@@ -197,8 +202,11 @@ static const struct
              { "TableRowRight", Atom::TableRowRight },
              { "TableItemLeft", Atom::TableItemLeft },
              { "TableItemRight", Atom::TableItemRight },
-             { "TableOfContents", Atom::TableOfContents },
+             { "TableOfContentsLeft", Atom::TableOfContentsLeft },
+             { "TableOfContentsRight", Atom::TableOfContentsRight },
              { "Target", Atom::Target },
+             { "TitleLeft", Atom::TitleLeft },
+             { "TitleRight", Atom::TitleRight },
              { "UnhandledFormat", Atom::UnhandledFormat },
              { "WarningLeft", Atom::WarningLeft },
              { "WarningRight", Atom::WarningRight },
@@ -255,12 +263,22 @@ static const struct
     Starting from this Atom, searches the linked list for the
     atom of specified type \a t and returns it. Returns \nullptr
     if no such atom is found.
+
+    If an atom is found and \a offset is not \nullptr, it's set
+    to the number of links traversed from this atom to the found
+    atom (0 if this atom matches). \a offset is untouched when
+    not found.
 */
-const Atom *Atom::find(AtomType t) const
+const Atom *Atom::find(AtomType t, qsizetype *offset) const
 {
+    qsizetype i{0};
     const auto *a{this};
-    while (a && a->type() != t)
+    while (a && a->type() != t) {
         a = a->next();
+        ++i;
+    }
+    if (a && offset)
+        *offset = i;
     return a;
 }
 
@@ -368,35 +386,48 @@ QString Atom::linkText() const
 }
 
 /*!
-  The only constructor for LinkAtom. It creates an Atom of
-  type Atom::Link. \a p1 being the link target. \a p2 is the
-  parameters in square brackets. Normally there is just one
-  word in the square brackets, but there can be up to three
-  words separated by spaces. The constructor splits \a p2 on
-  the space character.
+  Constructs a LinkAtom of type Atom::Link. \a p1 is the link target.
+  \a p2 holds the parameters that appeared in square brackets. Normally
+  there is just one word in the square brackets, but there can be up
+  to three words separated by spaces. The constructor splits \a p2 on
+  the space character. \a location identifies where in the source
+  the link directive was written, so downstream consumers can attribute
+  diagnostics back to the originating line.
  */
 LinkAtom::LinkAtom(const QString &p1, const QString &p2, Location location)
     : Atom(Atom::Link, p1),
       location(location),
-      m_resolved(false),
-      m_genus(Node::DontCare),
-      m_domain(nullptr),
-      m_squareBracketParams(p2)
+      m_genus(Genus::DontCare),
+      m_domain(nullptr)
 {
-    // nada.
+    resolveSquareBracketParams(p2);
 }
 
 /*!
-  This function resolves the parameters that were enclosed in
-  square brackets. If the parameters have already been resolved,
-  it does nothing and returns immediately.
+  Constructs a LinkAtom carrying an explicit atom \a type. This overload
+  exists so DocParser can promote autolink atoms (Atom::AutoLink) to
+  LinkAtom while preserving the type tag that downstream generators
+  dispatch on. \a p1, \a p2, and \a location follow the same semantics
+  as the primary constructor.
  */
-void LinkAtom::resolveSquareBracketParams()
+LinkAtom::LinkAtom(Atom::AtomType type, const QString &p1, const QString &p2,
+                   Location location)
+    : Atom(type, p1),
+      location(location),
+      m_genus(Genus::DontCare),
+      m_domain(nullptr)
 {
-    if (m_resolved)
-        return;
-    const QStringList params = m_squareBracketParams.toLower().split(QLatin1Char(' '));
-    for (const auto &param : params) {
+    resolveSquareBracketParams(p2);
+}
+
+/*!
+  Resolves the parameters that were enclosed in square brackets, supplied as
+  \a text, setting the domain and genus to appropriate values.
+ */
+void LinkAtom::resolveSquareBracketParams(const QString &text)
+{
+    m_squareBracketParams = text.toLower().split(QLatin1Char(' '));
+    for (const auto &param : m_squareBracketParams) {
         if (!m_domain) {
             m_domain = QDocDatabase::qdocDB()->findTree(param);
             if (m_domain) {
@@ -405,33 +436,31 @@ void LinkAtom::resolveSquareBracketParams()
         }
 
         if (param == "qml") {
-            m_genus = Node::QML;
+            m_genus = Genus::QML;
             continue;
         }
         if (param == "cpp") {
-            m_genus = Node::CPP;
+            m_genus = Genus::CPP;
             continue;
         }
         if (param == "doc") {
-            m_genus = Node::DOC;
+            m_genus = Genus::DOC;
             continue;
         }
         if (param == "api") {
-            m_genus = Node::API;
+            m_genus = Genus::API;
             continue;
         }
         break;
     }
-    m_resolved = true;
 }
 
 /*!
   Standard copy constructor of LinkAtom \a t.
  */
 LinkAtom::LinkAtom(const LinkAtom &t)
-    : Atom(Link, t.string()),
+    : Atom(t.m_type, t.string()),
       location(t.location),
-      m_resolved(t.m_resolved),
       m_genus(t.m_genus),
       m_domain(t.m_domain),
       m_squareBracketParams(t.m_squareBracketParams)
@@ -445,14 +474,22 @@ LinkAtom::LinkAtom(const LinkAtom &t)
   in the list.
  */
 LinkAtom::LinkAtom(Atom *previous, const LinkAtom &t)
-    : Atom(previous, Link, t.string()),
+    : Atom(previous, t.m_type, t.string()),
       location(t.location),
-      m_resolved(t.m_resolved),
       m_genus(t.m_genus),
       m_domain(t.m_domain),
       m_squareBracketParams(t.m_squareBracketParams)
 {
     previous->m_next = this;
+}
+
+int LinkAtom::flags() const
+{
+    int flags = 0;
+    if (m_squareBracketParams.contains("attached"))
+        flags |= QmlAttachedProperties;
+
+    return flags;
 }
 
 QT_END_NAMESPACE

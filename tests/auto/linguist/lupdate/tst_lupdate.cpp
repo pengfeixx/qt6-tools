@@ -22,8 +22,6 @@
 
 using namespace Qt::Literals::StringLiterals;
 
-// The slowest test (clang-proparsing) has been observed to take 22s in COIN/Linux.
-// Windows does not run the clang tests.
 static constexpr int TIMEOUT = 120000;
 
 class tst_lupdate : public QObject
@@ -43,6 +41,7 @@ private slots:
 
 private:
     QString m_cmdLupdate;
+    QString m_cmdLupdatePro;
     QString m_basePath;
     QElapsedTimer m_timer;
     qint64 m_maxElapsed = -1;
@@ -57,6 +56,7 @@ tst_lupdate::tst_lupdate()
     m_timer.start();
     QString binPath = QLibraryInfo::path(QLibraryInfo::BinariesPath);
     m_cmdLupdate = binPath + "/lupdate"_L1;
+    m_cmdLupdatePro = binPath + "/lupdate-pro"_L1;
     m_basePath = QFINDTESTDATA("testdata/");
 }
 
@@ -226,7 +226,6 @@ void tst_lupdate::doCompare(const QString &actualFn, const QString &expectedFn, 
 void tst_lupdate::good_data()
 {
     QTest::addColumn<QString>("directory");
-    QTest::addColumn<bool>("useClangCpp");
 
     QDir parsingDir(m_basePath + "good"_L1);
     QStringList dirs = parsingDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
@@ -237,46 +236,10 @@ void tst_lupdate::good_data()
 #ifndef Q_OS_MACOS
     dirs.removeAll("parseobjc"_L1);
 #endif
-    QSet<QString> ignoredTests = {
-        "lacksqobject_clang_parser"_L1, "parsecontexts_clang_parser"_L1, "parsecpp2_clang_parser"_L1,
-        "parsecpp_clang_parser"_L1,     "prefix_clang_parser"_L1,        "preprocess_clang_parser"_L1,
-        "parsecpp_clang_only"_L1};
 
-    // Add test rows for the "classic" lupdate
     for (const QString &dir : dirs) {
-        if (ignoredTests.contains(dir))
-            continue;
-        QTest::newRow(dir.toLocal8Bit()) << dir << false;
+        QTest::newRow(dir.toLocal8Bit().constData()) << dir;
     }
-
-#if QT_CONFIG(clangcpp) && QT_CONFIG(widgets)
-    if (QSysInfo::currentCpuArchitecture() == "arm64"_L1
-        && QSysInfo::kernelType() == "linux"_L1 ) {
-        qDebug("clangcpp tests are skipped on linux arm64, see also QTBUG-127751");
-        return;
-    }
-
-    // Add test rows for the clang-based lupdate
-    ignoredTests = {
-        "lacksqobject"_L1,
-        "parsecontexts"_L1,
-        "parsecpp"_L1,
-        "parsecpp2",
-        "parseqrc_json"_L1,
-        "prefix"_L1,
-        "preprocess"_L1,
-        "proparsing2"_L1, // llvm8 cannot handle file name without extension
-        "respfile"_L1, //@lst not supported with the new parser yet (include not properly set in the compile_command.json)
-        "cmdline_deeppath"_L1, //no project file, new parser does not support (yet) this way of launching lupdate
-        "cmdline_order"_L1, // no project, new parser do not pickup on macro defined but not used. Test not needed for new parser.
-        "cmdline_recurse"_L1 // recursive scan without project file not supported (yet) with the new parser
-    };
-    for (const QString &dir : dirs) {
-        if (ignoredTests.contains(dir))
-            continue;
-        QTest::newRow(("clang-"_ba + dir.toLocal8Bit()).constData()) << dir << true;
-    }
-#endif
 }
 
 static QByteArray msgStartFailed(const QProcess &process)
@@ -311,7 +274,6 @@ static QByteArray msgExitCode(const QProcess &process, const QByteArray &output)
 void tst_lupdate::good()
 {
     QFETCH(QString, directory);
-    QFETCH(bool, useClangCpp);
 
     QString dir = m_basePath + "good/"_L1 + directory;
     QString workDir = dir;
@@ -367,14 +329,19 @@ void tst_lupdate::good()
     }
 
     lupdateArguments.prepend("-silent"_L1);
-    if (useClangCpp)
-        lupdateArguments.append("-clang-parser"_L1);
+
+    QString command;
+    if (lupdateArguments.contains("project.pro"_L1)
+        || lupdateArguments.contains("subdir1/subdir1.pro"_L1))
+        command = m_cmdLupdatePro;
+    else
+        command = m_cmdLupdate;
 
     QProcess proc;
     proc.setWorkingDirectory(workDir);
     proc.setProcessChannelMode(QProcess::MergedChannels);
     const auto startTime = m_timer.elapsed();
-    proc.start(m_cmdLupdate, lupdateArguments, QIODevice::ReadWrite | QIODevice::Text);
+    proc.start(command, lupdateArguments, QIODevice::ReadWrite | QIODevice::Text);
     QVERIFY2(proc.waitForStarted(), msgStartFailed(proc).constData());
     if (!proc.waitForFinished(TIMEOUT)) {
         const auto message = msgTimeout(proc);
@@ -403,13 +370,8 @@ void tst_lupdate::good()
     }
 
     for (const QString &ts : std::as_const(generatedtsfiles)) {
-        if (dir.endsWith("preprocess_clang_parser"_L1)) {
-            doCompare(workDir + u'/' + ts,
-                      dir + u'/' + ts + ".result"_L1, true);
-        } else {
         doCompare(workDir + u'/' + ts,
                   dir + u'/' + ts + ".result"_L1, false);
-        }
     }
 }
 

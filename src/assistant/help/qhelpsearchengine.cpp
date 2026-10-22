@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "qhelpsearchengine.h"
 #include "qhelpenginecore.h"
@@ -223,7 +224,8 @@ int QHelpSearchEngine::searchResultCount() const
 QList<QHelpSearchEngine::SearchHit> QHelpSearchEngine::hits(int start, int end) const
 {
     QList<QHelpSearchEngine::SearchHit> hits;
-    for (const QHelpSearchResult &result : searchResults(start, end))
+    const auto &results = searchResults(start, end);
+    for (const QHelpSearchResult &result : results)
         hits.append(qMakePair(result.url().toString(), result.title()));
     return hits;
 }

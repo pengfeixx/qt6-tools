@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #ifndef ABSTRACTACTIONEDITOR_H
 #define ABSTRACTACTIONEDITOR_H
@@ -18,7 +19,7 @@ class QDESIGNER_SDK_EXPORT QDesignerActionEditorInterface: public QWidget
     Q_OBJECT
 public:
     explicit QDesignerActionEditorInterface(QWidget *parent, Qt::WindowFlags flags = {});
-    virtual ~QDesignerActionEditorInterface();
+    ~QDesignerActionEditorInterface() override;
 
     virtual QDesignerFormEditorInterface *core() const;
 

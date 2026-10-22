@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #include "formwindowsettings.h"
 #include "ui_formwindowsettings.h"
@@ -43,6 +44,7 @@ struct FormWindowData {
     bool hasFormGrid{false};
     Grid grid;
     bool idBasedTranslations{false};
+    QString idBasedTranslationLabel;
     bool connectSlotsByName{true};
 
     friend bool comparesEqual(const FormWindowData &lhs,
@@ -58,6 +60,7 @@ QDebug operator<<(QDebug str, const  FormWindowData &d)
         << d.pixFunction << " Author=" << d.author << " Hints=" << d.includeHints
         << " Grid=" << d.hasFormGrid << d.grid.deltaX() << d.grid.deltaY()
         << " ID-based translations" << d.idBasedTranslations
+        << " ID-based translation label" << d.idBasedTranslationLabel
         << " Connect slots by name" << d.connectSlotsByName
         << '\n';
     return str;
@@ -77,6 +80,7 @@ bool comparesEqual(const FormWindowData &lhs, const FormWindowData &rhs) noexcep
            lhs.hasFormGrid            == rhs.hasFormGrid &&
            lhs.grid                   == rhs.grid &&
            lhs.idBasedTranslations    == rhs.idBasedTranslations &&
+           lhs.idBasedTranslationLabel== rhs.idBasedTranslationLabel &&
            lhs.connectSlotsByName     == rhs.connectSlotsByName;
 }
 
@@ -109,6 +113,7 @@ void FormWindowData::fromFormWindow(FormWindowBase* fw)
     hasFormGrid = fw->hasFormGrid();
     grid = hasFormGrid ? fw->designerGrid() : FormWindowBase::defaultDesignerGrid();
     idBasedTranslations = fw->useIdBasedTranslations();
+    idBasedTranslationLabel = fw->idBasedTranslationLabel();
     connectSlotsByName = fw->connectSlotsByName();
 }
 
@@ -136,6 +141,7 @@ void FormWindowData::applyToFormWindow(FormWindowBase* fw) const
     if (hasFormGrid || hadFormGrid != hasFormGrid)
         fw->setDesignerGrid(hasFormGrid ? grid : FormWindowBase::defaultDesignerGrid());
     fw->setUseIdBasedTranslations(idBasedTranslations);
+    fw->setIdBasedTranslationLabel(idBasedTranslationLabel);
     fw->setConnectSlotsByName(connectSlotsByName);
 }
 
@@ -201,6 +207,7 @@ FormWindowData FormWindowSettings::data() const
     rc.hasFormGrid = m_ui->gridPanel->isChecked();
     rc.grid = m_ui->gridPanel->grid();
     rc.idBasedTranslations = m_ui->idBasedTranslationsCheckBox->isChecked();
+    rc.idBasedTranslationLabel = m_ui->idBasedTranslationLabelLineEdit->text();
     rc.connectSlotsByName = m_ui->connectSlotsByNameCheckBox->isChecked();
     return rc;
 }
@@ -229,6 +236,7 @@ void FormWindowSettings::setData(const FormWindowData &data)
     m_ui->gridPanel->setChecked(data.hasFormGrid);
     m_ui->gridPanel->setGrid(data.grid);
     m_ui->idBasedTranslationsCheckBox->setChecked(data.idBasedTranslations);
+    m_ui->idBasedTranslationLabelLineEdit->setText(data.idBasedTranslationLabel);
     m_ui->connectSlotsByNameCheckBox->setChecked(data.connectSlotsByName);
 }
 

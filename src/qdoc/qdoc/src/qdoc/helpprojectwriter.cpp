@@ -11,8 +11,13 @@
 #include "config.h"
 #include "enumnode.h"
 #include "functionnode.h"
+#include "genustypes.h"
 #include "htmlgenerator.h"
+#include "inclusionfilter.h"
+#include "location.h"
 #include "node.h"
+#include "nodecontext.h"
+#include "outputdirectory.h"
 #include "qdocdatabase.h"
 #include "typedefnode.h"
 
@@ -87,7 +92,7 @@ void HelpProjectWriter::reset(const QString &defaultFileName, Generator *g)
             subproject.m_type = config.get(subprefix + "type").asString();
             readSelectors(subproject, config.get(subprefix + "selectors").asStringList());
             subprefix.chop(1);
-            subproject.m_prefix = subprefix; // Stored for error reporting purposes
+            subproject.m_prefix = std::move(subprefix); // Stored for error reporting purposes
             project.m_subprojects.append(subproject);
         }
 
@@ -103,50 +108,51 @@ void HelpProjectWriter::reset(const QString &defaultFileName, Generator *g)
 
 void HelpProjectWriter::readSelectors(SubProject &subproject, const QStringList &selectors)
 {
-    QHash<QString, Node::NodeType> typeHash;
-    typeHash["namespace"] = Node::Namespace;
-    typeHash["class"] = Node::Class;
-    typeHash["struct"] = Node::Struct;
-    typeHash["union"] = Node::Union;
-    typeHash["header"] = Node::HeaderFile;
-    typeHash["headerfile"] = Node::HeaderFile;
-    typeHash["doc"] = Node::Page; // Unused (supported but ignored as a prefix)
-    typeHash["fake"] = Node::Page; // Unused (supported but ignored as a prefix)
-    typeHash["page"] = Node::Page;
-    typeHash["enum"] = Node::Enum;
-    typeHash["example"] = Node::Example;
-    typeHash["externalpage"] = Node::ExternalPage;
-    typeHash["typedef"] = Node::Typedef;
-    typeHash["typealias"] = Node::TypeAlias;
-    typeHash["function"] = Node::Function;
-    typeHash["property"] = Node::Property;
-    typeHash["variable"] = Node::Variable;
-    typeHash["group"] = Node::Group;
-    typeHash["module"] = Node::Module;
-    typeHash["qmlmodule"] = Node::QmlModule;
-    typeHash["qmlproperty"] = Node::QmlProperty;
-    typeHash["qmlclass"] = Node::QmlType; // Legacy alias for 'qmltype'
-    typeHash["qmltype"] = Node::QmlType;
-    typeHash["qmlbasictype"] = Node::QmlValueType; // Legacy alias for 'qmlvaluetype'
-    typeHash["qmlvaluetype"] = Node::QmlValueType;
+    QHash<QString, NodeType> typeHash;
+    typeHash["namespace"] = NodeType::Namespace;
+    typeHash["class"] = NodeType::Class;
+    typeHash["struct"] = NodeType::Struct;
+    typeHash["union"] = NodeType::Union;
+    typeHash["header"] = NodeType::HeaderFile;
+    typeHash["headerfile"] = NodeType::HeaderFile;
+    typeHash["doc"] = NodeType::Page; // Unused (supported but ignored as a prefix)
+    typeHash["fake"] = NodeType::Page; // Unused (supported but ignored as a prefix)
+    typeHash["page"] = NodeType::Page;
+    typeHash["enum"] = NodeType::Enum;
+    typeHash["example"] = NodeType::Example;
+    typeHash["externalpage"] = NodeType::ExternalPage;
+    typeHash["typedef"] = NodeType::Typedef;
+    typeHash["typealias"] = NodeType::TypeAlias;
+    typeHash["function"] = NodeType::Function;
+    typeHash["property"] = NodeType::Property;
+    typeHash["variable"] = NodeType::Variable;
+    typeHash["group"] = NodeType::Group;
+    typeHash["module"] = NodeType::Module;
+    typeHash["none"] = NodeType::NoType;
+    typeHash["qmlmodule"] = NodeType::QmlModule;
+    typeHash["qmlproperty"] = NodeType::QmlProperty;
+    typeHash["qmlclass"] = NodeType::QmlType; // Legacy alias for 'qmltype'
+    typeHash["qmltype"] = NodeType::QmlType;
+    typeHash["qmlbasictype"] = NodeType::QmlValueType; // Legacy alias for 'qmlvaluetype'
+    typeHash["qmlvaluetype"] = NodeType::QmlValueType;
 
     for (const QString &selector : selectors) {
         QStringList pieces = selector.split(QLatin1Char(':'));
         // Remove doc: or fake: prefix
-        if (pieces.size() > 1 && typeHash.value(pieces[0].toLower()) == Node::Page)
+        if (pieces.size() > 1 && typeHash.value(pieces[0].toLower()) == NodeType::Page)
             pieces.takeFirst();
 
         QString typeName = pieces.takeFirst().toLower();
         if (!typeHash.contains(typeName))
             continue;
 
-        subproject.m_selectors << typeHash.value(typeName);
+        subproject.m_selectors << static_cast<unsigned char>(typeHash.value(typeName));
         if (!pieces.isEmpty()) {
             pieces = pieces[0].split(QLatin1Char(','));
             for (const auto &piece : std::as_const(pieces)) {
-                if (typeHash[typeName] == Node::Group
-                    || typeHash[typeName] == Node::Module
-                    || typeHash[typeName] == Node::QmlModule) {
+                if (typeHash[typeName] == NodeType::Group
+                    || typeHash[typeName] == NodeType::Module
+                    || typeHash[typeName] == NodeType::QmlModule) {
                     subproject.m_groups << piece.toLower();
                 }
             }
@@ -206,7 +212,9 @@ bool HelpProjectWriter::generateSection(HelpProject &project, QXmlStreamWriter &
     // \group group_name itself is not documented.
     bool unseenGroup{node->isGroup() && !node->wasSeen()};
 
-    if ((node->isPrivate() || node->isInternal() || node->isDontDocument()) && !unseenGroup)
+    const InclusionPolicy policy = Config::instance().createInclusionPolicy();
+    const NodeContext context = node->createContext();
+    if ((!InclusionFilter::isIncluded(policy, context) || node->isDontDocument()) && !unseenGroup)
         return false;
 
     if (node->name().isEmpty())
@@ -220,15 +228,14 @@ bool HelpProjectWriter::generateSection(HelpProject &project, QXmlStreamWriter &
     // Only add nodes to the set for each subproject if they match a selector.
     // Those that match will be listed in the table of contents.
 
-    for (int i = 0; i < project.m_subprojects.size(); i++) {
-        SubProject subproject = project.m_subprojects[i];
+    for (auto &subproject : project.m_subprojects) {
         // No selectors: accept all nodes.
         if (subproject.m_selectors.isEmpty()) {
-            project.m_subprojects[i].m_nodes[objName] = node;
-        } else if (subproject.m_selectors.contains(node->nodeType())) {
+            subproject.m_nodes.insert(objName, node);
+        } else if (subproject.m_selectors.contains(static_cast<unsigned char>(node->nodeType()))) {
             // Add all group members for '[group|module|qmlmodule]:name' selector
             if (node->isCollectionNode()) {
-                if (project.m_subprojects[i].m_groups.contains(node->name().toLower())) {
+                if (subproject.m_groups.contains(node->name().toLower())) {
                     const auto *cn = static_cast<const CollectionNode *>(node);
                     const auto members = cn->members();
                     for (const Node *m : members) {
@@ -236,21 +243,23 @@ bool HelpProjectWriter::generateSection(HelpProject &project, QXmlStreamWriter &
                             continue;
                         QString memberName =
                                 m->isTextPageNode() ? m->fullTitle() : m->fullDocumentName();
-                        project.m_subprojects[i].m_nodes[memberName] = m;
+                        subproject.m_nodes.insert(memberName, m);
                     }
                     continue;
-                } else if (!project.m_subprojects[i].m_groups.isEmpty()) {
+                } else if (!subproject.m_groups.isEmpty()) {
                     continue; // Node does not represent specified group(s)
                 }
             } else if (node->isTextPageNode()) {
                 if (node->isExternalPage() || node->fullTitle().isEmpty())
                     continue;
             }
-            project.m_subprojects[i].m_nodes[objName] = node;
+            subproject.m_nodes.insert(objName, node);
         }
     }
 
     auto appendDocKeywords = [&](const Node *n) {
+        if (n->doc().isEmpty())
+            return;
         for (const auto *kw : n->doc().keywords()) {
                 if (!kw->string().isEmpty()) {
                     QStringList ref_parts = m_gen->fullDocumentLocation(n).split('#'_L1);
@@ -271,22 +280,23 @@ bool HelpProjectWriter::generateSection(HelpProject &project, QXmlStreamWriter &
 
     switch (node->nodeType()) {
 
-    case Node::Class:
-    case Node::Struct:
-    case Node::Union:
+    case NodeType::Class:
+    case NodeType::Struct:
+    case NodeType::Union:
         project.m_keywords.append(keywordDetails(node));
         break;
-    case Node::QmlType:
-    case Node::QmlValueType:
+    case NodeType::QmlType:
+    case NodeType::QmlValueType:
         appendDocKeywords(node);
         project.m_keywords.append(keywordDetails(node));
         break;
 
-    case Node::Namespace:
+    case NodeType::Namespace:
         project.m_keywords.append(keywordDetails(node));
         break;
 
-    case Node::Enum:
+    case NodeType::Enum:
+    case NodeType::QmlEnum:
         project.m_keywords.append(keywordDetails(node));
         {
             const auto *enumNode = static_cast<const EnumNode *>(node);
@@ -303,26 +313,26 @@ bool HelpProjectWriter::generateSection(HelpProject &project, QXmlStreamWriter &
                     name = id = item.name();
                 }
                 QString ref = m_gen->fullDocumentLocation(node);
-                project.m_keywords.append(Keyword(name, id, ref));
+                project.m_keywords.append(Keyword(std::move(name), std::move(id), std::move(ref)));
             }
         }
         break;
 
-    case Node::Group:
-    case Node::Module:
-    case Node::QmlModule: {
+    case NodeType::Group:
+    case NodeType::Module:
+    case NodeType::QmlModule: {
         if (!node->fullTitle().isEmpty()) {
             appendDocKeywords(node);
             project.m_keywords.append(keywordDetails(node));
         }
     } break;
 
-    case Node::Property:
-    case Node::QmlProperty:
+    case NodeType::Property:
+    case NodeType::QmlProperty:
         project.m_keywords.append(keywordDetails(node));
         break;
 
-    case Node::Function: {
+    case NodeType::Function: {
         const auto *funcNode = static_cast<const FunctionNode *>(node);
 
         /*
@@ -349,8 +359,8 @@ bool HelpProjectWriter::generateSection(HelpProject &project, QXmlStreamWriter &
         if (node->parent())
             project.m_memberStatus[node->parent()].insert(node->status());
     } break;
-    case Node::TypeAlias:
-    case Node::Typedef: {
+    case NodeType::TypeAlias:
+    case NodeType::Typedef: {
         const auto *typedefNode = static_cast<const TypedefNode *>(node);
         Keyword typedefDetails = keywordDetails(node);
         const EnumNode *enumNode = typedefNode->associatedEnum();
@@ -362,13 +372,13 @@ bool HelpProjectWriter::generateSection(HelpProject &project, QXmlStreamWriter &
         project.m_keywords.append(typedefDetails);
     } break;
 
-    case Node::Variable: {
+    case NodeType::Variable: {
         project.m_keywords.append(keywordDetails(node));
     } break;
 
         // Page nodes (such as manual pages) contain subtypes, titles and other
         // attributes.
-    case Node::Page: {
+    case NodeType::Page: {
         if (!node->fullTitle().isEmpty()) {
             appendDocKeywords(node);
             project.m_keywords.append(keywordDetails(node));
@@ -382,10 +392,8 @@ bool HelpProjectWriter::generateSection(HelpProject &project, QXmlStreamWriter &
     const Atom *atom = node->doc().body().firstAtom();
     while (atom) {
         if (atom->type() == Atom::Image || atom->type() == Atom::InlineImage) {
-            // Images are all placed within a single directory regardless of
-            // whether the source images are in a nested directory structure.
-            QStringList pieces = atom->string().split(QLatin1Char('/'));
-            project.m_files.insert("images/" + pieces.last());
+            QStringList pieces = atom->string().split('/'_L1);
+            project.m_files.insert("%1/%2"_L1.arg(m_gen->imagesOutputDir(), pieces.last()));
         }
         atom = atom->next();
     }
@@ -420,8 +428,14 @@ void HelpProjectWriter::generateSections(HelpProject &project, QXmlStreamWriter 
                 childSet << child;
                 continue;
             }
-            if (child->isIndexNode() || child->isPrivate())
+            if (child->isIndexNode())
                 continue;
+
+            const InclusionPolicy policy = Config::instance().createInclusionPolicy();
+            const NodeContext context = child->createContext();
+            if (!InclusionFilter::isIncluded(policy, context))
+                continue;
+
             if (child->isTextPageNode()) {
                 if (!childSet.contains(child))
                     childSet << child;
@@ -475,12 +489,12 @@ void HelpProjectWriter::addMembers(HelpProject &project, QXmlStreamWriter &write
 
     // Do not generate a 'List of all members' for namespaces or header files,
     // but always generate it for derived classes and QML types (but not QML value types)
-    if (!node->isNamespace() && !node->isHeader() && !node->isQmlBasicType()
+    if (!node->isNamespace() && !node->isHeader() && !node->isQmlBasicType() && !node->isWrapper()
         && (derivedClass || node->isQmlType() || !project.m_memberStatus[node].isEmpty())) {
         QString membersPath = href + QStringLiteral("-members.html");
         writeSection(writer, membersPath, QStringLiteral("List of all members"));
     }
-    if (project.m_memberStatus[node].contains(Node::Deprecated)) {
+    if (project.m_memberStatus[node].contains(Status::Deprecated)) {
         QString obsoletePath = href + QStringLiteral("-obsolete.html");
         writeSection(writer, obsoletePath, QStringLiteral("Obsolete members"));
     }
@@ -493,11 +507,11 @@ void HelpProjectWriter::writeNode(HelpProject &project, QXmlStreamWriter &writer
 
     switch (node->nodeType()) {
 
-    case Node::Class:
-    case Node::Struct:
-    case Node::Union:
-    case Node::QmlType:
-    case Node::QmlValueType: {
+    case NodeType::Class:
+    case NodeType::Struct:
+    case NodeType::Union:
+    case NodeType::QmlType:
+    case NodeType::QmlValueType: {
         QString typeStr = m_gen->typeString(node);
         if (!typeStr.isEmpty())
             typeStr[0] = typeStr[0].toTitleCase();
@@ -514,20 +528,20 @@ void HelpProjectWriter::writeNode(HelpProject &project, QXmlStreamWriter &writer
         writer.writeEndElement(); // section
     } break;
 
-    case Node::Namespace:
+    case NodeType::Namespace:
         writeSection(writer, href, "%1 Namespace Reference"_L1.arg(objName));
         break;
 
-    case Node::Example:
-    case Node::HeaderFile:
-    case Node::Page:
-    case Node::Group:
-    case Node::Module:
-    case Node::QmlModule: {
+    case NodeType::Example:
+    case NodeType::HeaderFile:
+    case NodeType::Page:
+    case NodeType::Group:
+    case NodeType::Module:
+    case NodeType::QmlModule: {
         writer.writeStartElement("section");
         writer.writeAttribute("ref", href);
         writer.writeAttribute("title", node->fullTitle());
-        if (node->nodeType() == Node::HeaderFile)
+        if (node->nodeType() == NodeType::HeaderFile)
             addMembers(project, writer, node);
         writer.writeEndElement(); // section
     } break;
@@ -554,9 +568,14 @@ void HelpProjectWriter::generateProject(HelpProject &project)
     project.m_files.clear();
     project.m_keywords.clear();
 
-    QFile file(m_outputDir + QDir::separator() + project.m_fileName);
-    if (!file.open(QFile::WriteOnly))
+    const OutputDirectory outputDir =
+            OutputDirectory::ensure(m_outputDir, Location());
+
+    QFile file(outputDir.absoluteFilePath(project.m_fileName));
+    if (!file.open(QFile::WriteOnly)) {
+        Location().error(u"Cannot open '%1' for writing"_s.arg(file.fileName()));
         return;
+    }
 
     QXmlStreamWriter writer(&file);
     writer.setAutoFormatting(true);
@@ -639,16 +658,47 @@ void HelpProjectWriter::generateProject(HelpProject &project)
                         break;
                     case Atom::Link:
                         if (inItem) {
+                            // Omit external link targets
+                            const Node *page = m_qdb->findNodeForTarget(atom->string(), nullptr);
+                            if (!page || page->isExternalPage())
+                                break;
+
                             if (sectionStack.top() > 0)
                                 writer.writeEndElement(); // section
 
-                            const Node *page = m_qdb->findNodeForTarget(atom->string(), nullptr);
                             writer.writeStartElement("section");
                             QString indexPath = m_gen->fullDocumentLocation(page);
                             writer.writeAttribute("ref", indexPath);
                             writer.writeAttribute("title", atom->linkText());
 
                             sectionStack.top() += 1;
+                        }
+                        break;
+                    case Atom::AnnotatedList:
+                    case Atom::GeneratedList:
+                        if (const auto *cn = m_qdb->getCollectionNode(atom->string(), NodeType::Group)) {
+                            const auto sortOrder{Generator::sortOrder(atom->strings().last())};
+                            NodeList members{cn->members()};
+                            // Drop non-page nodes and index nodes so that we do not go outside of
+                            // this documentation set.
+                            members.erase(std::remove_if(members.begin(), members.end(),
+                                    [](const Node *n) {
+                                        return n->isIndexNode() || !n->isPageNode() || n->isExternalPage();
+                                    }), members.end());
+                            if (members.isEmpty())
+                                break;
+
+                            if (sortOrder == Qt::DescendingOrder)
+                                std::sort(members.rbegin(), members.rend(), Node::nodeSortKeyOrNameLessThan);
+                            else
+                                std::sort(members.begin(), members.end(), Node::nodeSortKeyOrNameLessThan);
+
+                            for (const auto *m : members) {
+                                writer.writeStartElement("section");
+                                writer.writeAttribute("ref", m_gen->fullDocumentLocation(m));
+                                writer.writeAttribute("title", m->title());
+                                writer.writeEndElement();
+                            }
                         }
                         break;
                     default:;
@@ -665,8 +715,8 @@ void HelpProjectWriter::generateProject(HelpProject &project)
         } else {
 
             writer.writeStartElement("section");
-            QString indexPath = m_gen->fullDocumentLocation(
-                    m_qdb->findNodeForTarget(subproject.m_indexTitle, nullptr));
+            const Node *indexNode = m_qdb->findNodeForTarget(subproject.m_indexTitle, nullptr);
+            QString indexPath = m_gen->fullDocumentLocation(indexNode);
             if (indexPath.isEmpty() && !subproject.m_indexTitle.isEmpty())
                 Config::instance().location().warning(
                         "Failed to find %1.indexTitle '%2'"_L1.arg(subproject.m_prefix, subproject.m_indexTitle));

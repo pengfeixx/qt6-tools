@@ -6,4 +6,13 @@
     //! proxy page; Relate the topic command to itself.
     \typealias StdPair
     \relates StdPair
+
+    \a T1 is the first type, \a T2 is the second type.
+*/
+
+/*!
+    \fn void globalFunc()
+    \relates Exists::Not
+
+    //! Creates a proxy for Exists::Not, and reports it as missing.
 */

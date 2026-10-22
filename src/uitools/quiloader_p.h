@@ -1,5 +1,6 @@
 // Copyright (C) 2020 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #ifndef QUILOADER_P_H
 #define QUILOADER_P_H
@@ -24,12 +25,12 @@ QT_FORWARD_DECLARE_CLASS(QDataStream)
 // This file is here for use by the form preview in Linguist. If you change anything
 // here or in the code which uses it, remember to adapt Linguist accordingly.
 
-#define PROP_GENERIC_PREFIX "_q_notr_"
-#define PROP_TOOLITEMTEXT "_q_toolItemText_notr"
-#define PROP_TOOLITEMTOOLTIP "_q_toolItemToolTip_notr"
-#define PROP_TABPAGETEXT "_q_tabPageText_notr"
-#define PROP_TABPAGETOOLTIP "_q_tabPageToolTip_notr"
-#define PROP_TABPAGEWHATSTHIS "_q_tabPageWhatsThis_notr"
+static constexpr const char PROP_GENERIC_PREFIX[] = "_q_notr_";
+static constexpr const char PROP_TOOLITEMTEXT[] = "_q_toolItemText_notr";
+static constexpr const char PROP_TOOLITEMTOOLTIP[] = "_q_toolItemToolTip_notr";
+static constexpr const char PROP_TABPAGETEXT[] = "_q_tabPageText_notr";
+static constexpr const char PROP_TABPAGETOOLTIP[] = "_q_tabPageToolTip_notr";
+static constexpr const char PROP_TABPAGEWHATSTHIS[] = "_q_tabPageWhatsThis_notr";
 
 QT_BEGIN_NAMESPACE
 

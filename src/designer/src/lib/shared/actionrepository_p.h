@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 //
 //  W A R N I N G
@@ -191,7 +192,7 @@ public slots:
 
 signals:
     void contextMenuRequested(QContextMenuEvent *event, QAction *);
-    void currentChanged(QAction *action);
+    void currentActionChanged(QAction *action);
     void activated(QAction *action, int column);
     void selectionChanged(const QItemSelection& selected, const QItemSelection& deselected);
     void resourceImageDropped(const QString &data, QAction *action);

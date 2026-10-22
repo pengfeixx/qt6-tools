@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #ifndef PREFERENCESDIALOG_H
 #define PREFERENCESDIALOG_H
@@ -21,7 +22,7 @@ class PreferencesDialog: public QDialog
     Q_OBJECT
 public:
     explicit PreferencesDialog(QDesignerFormEditorInterface *core, QWidget *parentWidget = nullptr);
-    ~PreferencesDialog();
+    ~PreferencesDialog() override;
 
 
 private slots:

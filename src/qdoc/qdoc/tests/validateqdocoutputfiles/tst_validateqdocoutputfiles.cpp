@@ -5,6 +5,8 @@
 
 #include <utility>
 
+using namespace Qt::StringLiterals;
+
 class tst_validateQdocOutputFiles : public QObject
 {
     Q_OBJECT
@@ -23,7 +25,7 @@ private:
     const QString m_testDataDirectory = QFINDTESTDATA("testdata");
     QString m_qdocBinary{};
     QString m_extraParams{};
-    QScopedPointer<QTemporaryDir> m_outputDir{};
+    QTemporaryDir m_outputDir;
 };
 
 static constexpr QLatin1StringView ASAN_OPTIONS_ENVVAR{"ASAN_OPTIONS"};
@@ -35,6 +37,26 @@ static QProcessEnvironment s_environment {QProcessEnvironment::systemEnvironment
 
 void tst_validateQdocOutputFiles::initTestCase()
 {
+#if (defined(__has_feature) && __has_feature(address_sanitizer)) || defined(__SANITIZE_ADDRESS__)
+    // The QDoc subprocess this test spawns links against a libclang built
+    // without LLVM_USE_SANITIZER=Address. The asymmetric configuration
+    // trips an upstream LLVM defect in BumpPtrAllocator: inline
+    // poison/unpoison calls are gated on a per-translation-unit macro,
+    // so the slow-path StartNewSlab poisons via QDoc's instrumented copy
+    // while downstream consumers inside libclang read those bytes through
+    // compiler-instrumented loads that ASan reports as use-after-poison.
+    // The reports surface across many libclang code paths and include
+    // direct loads that ASan suppression files cannot mask.
+    //
+    // Re-enable this test under ASan once an upstream LLVM fix is rolled
+    // out to the Coin libclang artefact, or once a sanitiser-instrumented
+    // libclang variant replaces the asymmetric configuration. See the
+    // tracking JIRA for the upstream-issue URL and the conditions under
+    // which the skip should be removed.
+    QSKIP("Disabled under AddressSanitizer: upstream LLVM BumpPtrAllocator "
+          "defect (asymmetric instrumentation against an unsanitised libclang).");
+#endif
+
     if (s_environment.contains(REGENERATE_ENVVAR)) {
         qInfo() << "Regenerating expected output for all tests.";
         regenerate = true;
@@ -70,10 +92,10 @@ void tst_validateQdocOutputFiles::initTestCase()
 
 void tst_validateQdocOutputFiles::init()
 {
-    m_outputDir.reset(new QTemporaryDir());
-    if (!m_outputDir->isValid()) {
+    m_outputDir = {};
+    if (!m_outputDir.isValid()) {
         const QString errorMessage =
-                "Couldn't create temporary directory: " + m_outputDir->errorString();
+                "Couldn't create temporary directory: "_L1 + m_outputDir.errorString();
         QFAIL(qPrintable(errorMessage));
     }
 }
@@ -109,7 +131,7 @@ tst_validateQdocOutputFiles::gitDiffDirectories(const QString &actualPath, const
     QProcess gitProcess;
     gitProcess.setProgram("git");
 
-    const QStringList arguments{"diff", "--", actualPath, expectedPath};
+    const QStringList arguments{"diff", "--", expectedPath, actualPath};
     gitProcess.setArguments(arguments);
 
     auto failGit = [&](QProcess::ProcessError) {
@@ -132,6 +154,7 @@ void tst_validateQdocOutputFiles::qdocProjects_data()
     using namespace Qt::StringLiterals;
     QTest::addColumn<QString>("qdocconf");
     QTest::addColumn<QString>("expectedPath");
+    QTest::addColumn<QString>("extraArgs");
 
     QDirIterator qdocconfit(m_testDataDirectory, QStringList { u"*.qdocconf"_s },
                             QDir::Files | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
@@ -140,11 +163,19 @@ void tst_validateQdocOutputFiles::qdocProjects_data()
         if (configFile.baseName() != configFile.dir().dirName())
             continue;
 
+        QString extraArgs{configFile.dir().absolutePath() + u"/args.txt"_s};
+        if (QFileInfo::exists(extraArgs))
+            extraArgs.insert(0, u'@');
+        else
+            extraArgs.clear();
+
         const QString testName =
                 configFile.dir().dirName() + u'/' + configFile.fileName();
 
         QTest::newRow(testName.toUtf8().constData())
-                << configFile.absoluteFilePath() << configFile.dir().absolutePath() + "/expected/";
+                << configFile.absoluteFilePath()
+                << configFile.dir().absolutePath() + "/expected/"
+                << extraArgs;
     }
 }
 
@@ -152,8 +183,9 @@ void tst_validateQdocOutputFiles::qdocProjects()
 {
     QFETCH(const QString, qdocconf);
     QFETCH(const QString, expectedPath);
+    QFETCH(const QString, extraArgs);
 
-    QString actualPath{m_outputDir->path()};
+    QString actualPath{m_outputDir.path()};
     if (regenerate) {
         actualPath = expectedPath;
         QDir pathToRemove{expectedPath};
@@ -161,7 +193,9 @@ void tst_validateQdocOutputFiles::qdocProjects()
             qCritical("Cannot remove expected output directory, aborting!");
     }
 
-    const QStringList arguments{ "-outputdir", actualPath, m_extraParams, qdocconf };
+    QStringList arguments{ "-outputdir", actualPath, m_extraParams, qdocconf };
+    if (!extraArgs.isEmpty())
+        arguments << extraArgs;
 
     runQDocProcess(arguments);
 

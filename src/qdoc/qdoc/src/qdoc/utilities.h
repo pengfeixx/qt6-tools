@@ -4,23 +4,43 @@
 #ifndef UTILITIES_H
 #define UTILITIES_H
 
+#include "qdoclogging.h"
+
 #include <QtCore/qstring.h>
-#include <QtCore/qloggingcategory.h>
+
+#include <functional>
+
+using namespace Qt::Literals::StringLiterals;
 
 QT_BEGIN_NAMESPACE
 
-Q_DECLARE_LOGGING_CATEGORY(lcQdoc)
-Q_DECLARE_LOGGING_CATEGORY(lcQdocClang)
+class INode;
+class Location;
+class Node;
 
 namespace Utilities {
 void startDebugging(const QString &message);
 void stopDebugging(const QString &message);
 bool debugging();
 
-QString separator(qsizetype wordPosition, qsizetype numberOfWords);
-QString comma(qsizetype wordPosition, qsizetype numberOfWords);
-QString asAsciiPrintable(const QString &name);
+const INode *nodeForString(const QString &string);
+QString stringForNode(const INode *node);
+
+QString uniqueIdentifier(const Location &loc, const QString &prefix);
 QStringList getInternalIncludePaths(const QString &compiler);
+bool isGeneratedFile(const QString &path);
+QStringList pathAndFragment(const QString &linkText);
+[[nodiscard]] QString linkForExampleFile(const QString &path, const QString &project, const QString &fileExt);
+
+enum class ExampleFileKind { File, Image };
+[[nodiscard]] QString exampleFileTitle(const QString &fileName, ExampleFileKind kind);
+[[nodiscard]] QString exampleFileTitle(const QStringList &files, const QStringList &images, const QString &fileName);
+
+QString computeFileBase(
+    const Node *node,
+    const QString &project,
+    const std::function<QString(const Node *)> &prefixFn,
+    const std::function<QString(const Node *)> &suffixFn);
 }
 
 QT_END_NAMESPACE

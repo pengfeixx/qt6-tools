@@ -31,7 +31,7 @@ Product {
     }
     cpp.optimization: "fast"
     cpp.warningLevel: "none"
-    cpp.cxxLanguageVersion: "c++14"
+    cpp.cxxLanguageVersion: "c++17"
 
     Export {
         Depends { name: "cpp" }
@@ -114,16 +114,24 @@ Product {
         }
     }
 
+    Properties {
+        condition: qbs.toolchain.contains("msvc")
+        cpp.cxxFlags: outer.concat(["/permissive-", "/utf-8"])
+    }
+
     Group {
         condition: buildLib
         name: "litehtml sources"
         prefix: litehtmlHeaderDir + "/../../src/"
         files: [
+            "background.cpp",
             "codepoint.cpp",
             "css_borders.cpp",
             "css_length.cpp",
+            "css_parser.cpp",
             "css_properties.cpp",
             "css_selector.cpp",
+            "css_tokenizer.cpp",
             "document.cpp",
             "document_container.cpp",
             "el_anchor.cpp",
@@ -147,10 +155,13 @@ Product {
             "el_text.cpp",
             "el_title.cpp",
             "el_tr.cpp",
+            "encodings.cpp",
             "flex_item.cpp",
             "flex_line.cpp",
             "formatting_context.cpp",
+            "gradient.cpp",
             "html.cpp",
+            "html_microsyntaxes.cpp",
             "html_tag.cpp",
             "iterators.cpp",
             "line_box.cpp",
@@ -168,7 +179,6 @@ Product {
             "style.cpp",
             "stylesheet.cpp",
             "table.cpp",
-            "tstring_view.cpp",
             "url.cpp",
             "url_path.cpp",
             "utf8_strings.cpp",
@@ -188,9 +198,11 @@ Product {
             "css_length.h",
             "css_margins.h",
             "css_offsets.h",
+            "css_parser.h",
             "css_position.h",
             "css_properties.h",
             "css_selector.h",
+            "css_tokenizer.h",
             "document.h",
             "document_container.h",
             "el_anchor.h",
@@ -214,10 +226,12 @@ Product {
             "el_title.h",
             "el_tr.h",
             "element.h",
+            "encodings.h",
             "flex_item.h",
             "flex_line.h",
             "formatting_context.h",
             "html.h",
+            "html_microsyntaxes.h",
             "html_tag.h",
             "iterators.h",
             "line_box.h",
@@ -237,7 +251,6 @@ Product {
             "style.h",
             "stylesheet.h",
             "table.h",
-            "tstring_view.h",
             "types.h",
             "url.h",
             "url_path.h",

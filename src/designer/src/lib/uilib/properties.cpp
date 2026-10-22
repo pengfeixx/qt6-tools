@@ -1,5 +1,6 @@
 // Copyright (C) 2020 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "properties_p.h"
 #include "ui4_p.h"
@@ -34,7 +35,7 @@ QVariant domPropertyToVariant(QAbstractFormBuilder *afb,const QMetaObject *meta,
     // Complex types that need functions from QAbstractFormBuilder
     switch(p->kind()) {
     case DomProperty::String: {
-        const int index = meta->indexOfProperty(p->attributeName().toUtf8());
+        const int index = meta->indexOfProperty(p->attributeName().toUtf8().constData());
         if (index != -1 && meta->property(index).metaType().id() == QMetaType::QKeySequence)
             return QVariant::fromValue(QKeySequence(p->elementString()->text()));
     }
@@ -59,7 +60,7 @@ QVariant domPropertyToVariant(QAbstractFormBuilder *afb,const QMetaObject *meta,
 
     case DomProperty::Set: {
         const QByteArray pname = p->attributeName().toUtf8();
-        const int index = meta->indexOfProperty(pname);
+        const int index = meta->indexOfProperty(pname.constData());
         if (index == -1) {
             uiLibWarning(QCoreApplication::translate("QFormBuilder", "The set-type property %1 could not be read.").arg(p->attributeName()));
             return QVariant();
@@ -72,15 +73,15 @@ QVariant domPropertyToVariant(QAbstractFormBuilder *afb,const QMetaObject *meta,
         if (!ok) {
             uiLibWarning(QCoreApplication::translate("QFormBuilder",
                                                      "The value \"%1\" of the set-type property %2 could not be read.").
-                                                     arg(p->attributeName(), p->elementSet()));
+                                                     arg(p->elementSet(), p->attributeName()));
             return {};
         }
         return result;
     }
 
     case DomProperty::Enum: {
-        const QByteArray pname = p->attributeName().toUtf8();
-        const int index = meta->indexOfProperty(pname);
+        const QByteArray pname = p->attributeName().toUtf8().constData();
+        const int index = meta->indexOfProperty(pname.constData());
         const auto &enumValue = p->elementEnum();
         // Triggers in case of objects in Designer like Spacer/Line for which properties
         // are serialized using language introspection. On preview, however, these objects are
@@ -101,7 +102,7 @@ QVariant domPropertyToVariant(QAbstractFormBuilder *afb,const QMetaObject *meta,
         if (!ok) {
             uiLibWarning(QCoreApplication::translate("QFormBuilder",
                                                      "The value \"%1\" of the enum-type property %2 could not be read.").
-                         arg(p->attributeName(), enumValue));
+                         arg(enumValue, p->attributeName()));
             return {};
         }
         return result;
@@ -292,14 +293,16 @@ QVariant domPropertyToVariant(const DomProperty *p)
         if (sizep->hasElementHSizeType()) {
             sizePolicy.setHorizontalPolicy((QSizePolicy::Policy) sizep->elementHSizeType());
         } else if (sizep->hasAttributeHSizeType()) {
-            const QSizePolicy::Policy sp = enumKeyToValue<QSizePolicy::Policy>(sizeType_enum, sizep->attributeHSizeType().toLatin1());
+            const auto sp = enumKeyToValue<QSizePolicy::Policy>(
+                    sizeType_enum, sizep->attributeHSizeType().toLatin1().constData());
             sizePolicy.setHorizontalPolicy(sp);
         }
 
         if (sizep->hasElementVSizeType()) {
             sizePolicy.setVerticalPolicy((QSizePolicy::Policy) sizep->elementVSizeType());
         } else if (sizep->hasAttributeVSizeType()) {
-            const  QSizePolicy::Policy sp = enumKeyToValue<QSizePolicy::Policy>(sizeType_enum, sizep->attributeVSizeType().toLatin1());
+            const auto sp = enumKeyToValue<QSizePolicy::Policy>(
+                    sizeType_enum, sizep->attributeVSizeType().toLatin1().constData());
             sizePolicy.setVerticalPolicy(sp);
         }
 
@@ -322,7 +325,7 @@ static bool applySimpleProperty(const QVariant &v, bool translateString, DomProp
 {
     switch (v.metaType().id()) {
     case QMetaType::QString: {
-        DomString *str = new DomString();
+        auto *str = new DomString();
         str->setText(v.toString());
         if (!translateString)
             str->setAttributeNotr(u"true"_s);
@@ -359,7 +362,7 @@ static bool applySimpleProperty(const QVariant &v, bool translateString, DomProp
         return true;
 
     case QMetaType::QChar: {
-        DomChar *ch = new DomChar();
+        auto *ch = new DomChar();
         const QChar character = v.toChar();
         ch->setElementUnicode(character.unicode());
         dom_prop->setElementChar(ch);
@@ -367,7 +370,7 @@ static bool applySimpleProperty(const QVariant &v, bool translateString, DomProp
         return true;
 
     case QMetaType::QPoint: {
-        DomPoint *pt = new DomPoint();
+        auto *pt = new DomPoint();
         const QPoint point = v.toPoint();
         pt->setElementX(point.x());
         pt->setElementY(point.y());
@@ -376,7 +379,7 @@ static bool applySimpleProperty(const QVariant &v, bool translateString, DomProp
         return true;
 
     case QMetaType::QPointF: {
-        DomPointF *ptf = new DomPointF();
+        auto *ptf = new DomPointF();
         const QPointF pointf = v.toPointF();
         ptf->setElementX(pointf.x());
         ptf->setElementY(pointf.y());
@@ -385,8 +388,8 @@ static bool applySimpleProperty(const QVariant &v, bool translateString, DomProp
         return true;
 
     case QMetaType::QColor: {
-        DomColor *clr = new DomColor();
-        const QColor color = qvariant_cast<QColor>(v);
+        auto *clr = new DomColor();
+        const auto color = qvariant_cast<QColor>(v);
         clr->setElementRed(color.red());
         clr->setElementGreen(color.green());
         clr->setElementBlue(color.blue());
@@ -398,7 +401,7 @@ static bool applySimpleProperty(const QVariant &v, bool translateString, DomProp
         return true;
 
     case QMetaType::QSize: {
-        DomSize *sz = new DomSize();
+        auto *sz = new DomSize();
         const QSize size = v.toSize();
         sz->setElementWidth(size.width());
         sz->setElementHeight(size.height());
@@ -407,7 +410,7 @@ static bool applySimpleProperty(const QVariant &v, bool translateString, DomProp
         return true;
 
     case QMetaType::QSizeF: {
-        DomSizeF *szf = new DomSizeF();
+        auto *szf = new DomSizeF();
         const QSizeF sizef = v.toSizeF();
         szf->setElementWidth(sizef.width());
         szf->setElementHeight(sizef.height());
@@ -416,7 +419,7 @@ static bool applySimpleProperty(const QVariant &v, bool translateString, DomProp
         return true;
 
     case QMetaType::QRect: {
-        DomRect *rc = new DomRect();
+        auto *rc = new DomRect();
         const QRect rect = v.toRect();
         rc->setElementX(rect.x());
         rc->setElementY(rect.y());
@@ -427,7 +430,7 @@ static bool applySimpleProperty(const QVariant &v, bool translateString, DomProp
         return true;
 
     case QMetaType::QRectF: {
-        DomRectF *rcf = new DomRectF();
+        auto *rcf = new DomRectF();
         const QRectF rectf = v.toRectF();
         rcf->setElementX(rectf.x());
         rcf->setElementY(rectf.y());
@@ -438,8 +441,8 @@ static bool applySimpleProperty(const QVariant &v, bool translateString, DomProp
         return true;
 
     case QMetaType::QFont: {
-        DomFont *fnt = new DomFont();
-        const QFont font = qvariant_cast<QFont>(v);
+        auto *fnt = new DomFont();
+        const auto font = qvariant_cast<QFont>(v);
         const uint mask = font.resolveMask();
         if (mask & QFont::WeightResolved) {
             switch (font.weight()) {
@@ -491,15 +494,15 @@ static bool applySimpleProperty(const QVariant &v, bool translateString, DomProp
 #endif
 
     case QMetaType::QKeySequence: {
-        DomString *s = new DomString();
+        auto *s = new DomString();
         s->setText(qvariant_cast<QKeySequence>(v).toString(QKeySequence::PortableText));
         dom_prop->setElementString(s);
         }
         return true;
 
     case QMetaType::QLocale: {
-        DomLocale *dom = new DomLocale();
-        const QLocale locale = qvariant_cast<QLocale>(v);
+        auto *dom = new DomLocale();
+        const auto locale = qvariant_cast<QLocale>(v);
 
         const QMetaEnum language_enum = metaEnum<QAbstractFormBuilderGadget>("language");
         const QMetaEnum territory_enum = metaEnum<QAbstractFormBuilderGadget>("country");
@@ -512,8 +515,8 @@ static bool applySimpleProperty(const QVariant &v, bool translateString, DomProp
         return true;
 
     case QMetaType::QSizePolicy: {
-        DomSizePolicy *dom = new DomSizePolicy();
-        const QSizePolicy sizePolicy = qvariant_cast<QSizePolicy>(v);
+        auto *dom = new DomSizePolicy();
+        const auto sizePolicy = qvariant_cast<QSizePolicy>(v);
 
         dom->setElementHorStretch(sizePolicy.horizontalStretch());
         dom->setElementVerStretch(sizePolicy.verticalStretch());
@@ -528,8 +531,8 @@ static bool applySimpleProperty(const QVariant &v, bool translateString, DomProp
         return true;
 
     case QMetaType::QDate: {
-        DomDate *dom = new DomDate();
-        const QDate date = qvariant_cast<QDate>(v);
+        auto *dom = new DomDate();
+        const auto date = qvariant_cast<QDate>(v);
 
         dom->setElementYear(date.year());
         dom->setElementMonth(date.month());
@@ -540,8 +543,8 @@ static bool applySimpleProperty(const QVariant &v, bool translateString, DomProp
         return true;
 
     case QMetaType::QTime: {
-        DomTime *dom = new DomTime();
-        const QTime time = qvariant_cast<QTime>(v);
+        auto *dom = new DomTime();
+        const auto time = qvariant_cast<QTime>(v);
 
         dom->setElementHour(time.hour());
         dom->setElementMinute(time.minute());
@@ -552,8 +555,8 @@ static bool applySimpleProperty(const QVariant &v, bool translateString, DomProp
         return true;
 
     case QMetaType::QDateTime: {
-        DomDateTime *dom = new DomDateTime();
-        const QDateTime dateTime = qvariant_cast<QDateTime>(v);
+        auto *dom = new DomDateTime();
+        const auto dateTime = qvariant_cast<QDateTime>(v);
 
         dom->setElementHour(dateTime.time().hour());
         dom->setElementMinute(dateTime.time().minute());
@@ -567,10 +570,10 @@ static bool applySimpleProperty(const QVariant &v, bool translateString, DomProp
         return true;
 
     case QMetaType::QUrl: {
-        DomUrl *dom = new DomUrl();
+        auto *dom = new DomUrl();
         const QUrl url = v.toUrl();
 
-        DomString *str = new DomString();
+        auto *str = new DomString();
         str->setText(url.toString());
         dom->setElementString(str);
 
@@ -579,7 +582,7 @@ static bool applySimpleProperty(const QVariant &v, bool translateString, DomProp
         return true;
 
     case QMetaType::QStringList: {
-        DomStringList *sl = new DomStringList;
+        auto *sl = new DomStringList;
         sl->setElementString(qvariant_cast<QStringList>(v));
         dom_prop->setElementStringList(sl);
     }
@@ -618,23 +621,59 @@ static bool isTranslatable(const QString &pname, const QVariant &v, const QMetaO
     return true;
 }
 
+// PYSIDE-3278 (since 7.0) Write fully qualified enums for Python. This code
+// path is used by QFormBuilder or Qt Widgets Designer when writing item view
+// content properties such as alignment (oversight from PYSIDE-2492, see also
+// qdesigner_resource.cpp).
+static bool supportsQualifiedEnums(const QVersionNumber &qtVersion)
+{
+    return qtVersion >= QVersionNumber{ 7, 0, 0 };
+}
+
+static QString enumPrefix(QMetaEnum metaEnum)
+{
+    QString result;
+    if (const auto *scope = metaEnum.scope())
+        result += QLatin1StringView(scope) + "::"_L1;
+    if (const auto *name = metaEnum.enumName()) // Anonymous?
+        result += QLatin1StringView(name) + "::"_L1;
+    return result;
+}
+
+static QString enumValue(QMetaEnum metaEnum, int v, const QVersionNumber &qtVersion)
+{
+    auto value = QLatin1StringView(metaEnum.valueToKey(v));
+    return supportsQualifiedEnums(qtVersion) ? enumPrefix(metaEnum) + value : QString{ value };
+}
+
+static QString flagsValue(QMetaEnum metaEnum, int v, const QVersionNumber &qtVersion)
+{
+    QString result = QLatin1StringView(metaEnum.valueToKeys(v));
+    if (supportsQualifiedEnums(qtVersion) && !result.isEmpty()) {
+        const QString prefix = enumPrefix(metaEnum);
+        result.replace(u'|', u'|' + prefix);
+        result.prepend(prefix);
+    }
+    return result;
+}
+
 // Convert complex variant types to DOM properties with the help of  QAbstractFormBuilder
 // Does not perform a check using  QAbstractFormBuilder::checkProperty().
 DomProperty *variantToDomProperty(QAbstractFormBuilder *afb, const QMetaObject *meta,
                                   const QString &pname, const QVariant &v)
 {
-    DomProperty *dom_prop = new DomProperty();
+    auto *dom_prop = new DomProperty();
     dom_prop->setAttributeName(pname);
 
-    const int pindex = meta->indexOfProperty(pname.toLatin1());
+    const int pindex = meta->indexOfProperty(pname.toLatin1().constData());
     if (pindex != -1) {
         QMetaProperty meta_property = meta->property(pindex);
-        if ((v.metaType().id() == QMetaType::Int || v.metaType().id() == QMetaType::UInt) && meta_property.isEnumType()) {
+        if (v.canConvert<int>() && meta_property.isEnumType()) {
             const QMetaEnum e = meta_property.enumerator();
             if (e.isFlag())
-                dom_prop->setElementSet(QString::fromLatin1(e.valueToKeys(v.toInt())));
+                dom_prop->setElementSet(flagsValue(e, v.toInt(), afb->d->m_saveVersion));
             else
-                dom_prop->setElementEnum(QString::fromLatin1(e.valueToKey(v.toInt())));
+                dom_prop->setElementEnum(enumValue(e, v.toInt(), afb->d->m_saveVersion));
             return dom_prop;
         }
         if (!meta_property.hasStdCppSet()
@@ -651,8 +690,8 @@ DomProperty *variantToDomProperty(QAbstractFormBuilder *afb, const QMetaObject *
     // Complex properties
     switch (v.metaType().id()) {
     case QMetaType::QPalette: {
-        DomPalette *dom = new DomPalette();
-        QPalette palette = qvariant_cast<QPalette>(v);
+        auto *dom = new DomPalette();
+        auto palette = qvariant_cast<QPalette>(v);
 
         palette.setCurrentColorGroup(QPalette::Active);
         dom->setElementActive(afb->saveColorGroup(palette));

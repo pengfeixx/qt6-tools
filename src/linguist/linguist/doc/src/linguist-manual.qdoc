@@ -21,9 +21,11 @@
 
     \table
     \row
-        \li \inlineimage front-publishing.png
-        \li \inlineimage front-ui.png
-        \li \inlineimage front-coding.png
+        \li \inlineimage front-publishing.png {Icon showing an publishing action}
+        \li \inlineimage front-ui.png {UI illustration showing Start buttons,
+                         toggle controls, and a circular selector on a dark
+                         screen}
+        \li \inlineimage front-coding.png {Illustration showing a code}
     \row
         \li \l{Release managers}
         \li \l{Translators}
@@ -34,22 +36,29 @@
                 \li \l {Creating translation files}
                 \li \l {Using lupdate}
                 \li \l {Using lrelease}
+                \li \l {Using lupdate-pro}
+                \li \l {Using lrelease-pro}
+                \li \l {Using lconvert}
+                \li \l {Using lcheck}
+                \li \l {Using ltext2id}
             \endlist
         \li
             \list
                 \li \l {Qt Linguist user interface}
                 \li \l {Translating strings}
-                \li \l {Selecting context to translate}
+                \li \l {Selecting context or label to translate}
                 \li \l {Selecting strings to translate}
                 \li \l {Viewing strings in context}
                 \li \l {Reusing translations}
                 \li \l {Validating translations}
                 \li \l {Translating multiple languages simultaneously}
+                \li \l {AI translation}
             \endlist
         \li
             \list
                 \li \l{TS file format}
                 \li \l{Text ID based translations}
+                \li \l{Meta strings reference}
                 \li \l{CMake Commands in Qt6 LinguistTools}{CMake commands}
                 \li \l{Examples}
             \endlist
@@ -71,22 +80,26 @@
                 \li \l {Creating translation files}
                 \li \l {Using lupdate}
                 \li \l {Using lrelease}
+                \li \l {Using lupdate-pro}
+                \li \l {Using lrelease-pro}
             \endlist
         \li \l{Translators}
             \list
                 \li \l {Qt Linguist user interface}
                 \li \l {Translating strings}
-                \li \l {Selecting context to translate}
+                \li \l {Selecting context or label to translate}
                 \li \l {Selecting strings to translate}
                 \li \l {Viewing strings in context}
                 \li \l {Reusing translations}
                 \li \l {Validating translations}
                 \li \l {Translating multiple languages simultaneously}
+                \li \l {AI translation}
             \endlist
         \li \l{Developers}
             \list
                 \li \l{TS file format}
                 \li \l{Text ID based translations}
+                \li \l{Meta strings reference}
                 \li \l{CMake Commands in Qt6 LinguistTools}{CMake commands}
                 \li \l{Examples}
             \endlist
@@ -100,7 +113,7 @@
     \previouspage Qt Linguist Manual
     \nextpage Creating translation files
 
-    \image front-publishing.png
+    \image front-publishing.png {Icon showing an publishing action}
 
     Release managers use \c lupdate to generate a set of translation source (TS)
     files from the application source files (QML and C++) and pass them to
@@ -161,7 +174,8 @@
 
         \li Run \c lupdate to incorporate any new text added to the application.
             \c lupdate synchronizes the user-visible text from the application
-            with the translations. It does not destroy any data.
+            with the translations. Existing translations in the TS file are
+            preserved.
 
         \li Run \c lrelease to read the TS files and produce the QM files used
             by the application at runtime.
@@ -255,11 +269,17 @@
         \li \c {-no-sort}
         \li Do not sort contexts in TS files.
     \row
+        \li \c {-sort-messages}
+        \li Sort messages in a context alphabetically in TS files.
+    \row
         \li \c {-no-recursive}
         \li Do not recursively scan directories.
     \row
         \li \c {-recursive}
         \li Recursively scan directories (default).
+    \row
+        \li \c {-warnings-are-errors}
+        \li Treat warnings as errors.
     \row
         \li \c {-I <includepath> or -I<includepath>}
         \li Look for include files in this additional location. You can specify
@@ -287,8 +307,8 @@
     \row
         \li \c {-project <filename>}
         \li Name of a file containing the project's description in JSON format.
-            You can use the \c lprodump tool to generate the file from a .pro
-            file.
+            You can use \c{lupdate-pro -dump-json <file>} to generate the
+            file from a .pro file.
     \row
         \li \c {-pro <filename>}
         \li Name of a .pro file. Useful for files with the .pro file syntax but
@@ -346,26 +366,6 @@
     \row
         \li \c {-version}
         \li Display the version of \c lupdate and exit.
-    \row
-        \li \c {-clang-parser [compilation-database-dir]}
-        \li Use clang to parse .cpp files. Otherwise, use a custom
-            parser. This option needs a clang compilation database
-            (\c compile_commands.json) for the files to be parsed.
-            Specify the path to the directory containing this file
-            on the command line, directly after the \c -clang-parser
-            option, or in the project file.
-
-            When using qmake, set the \c LUPDATE_COMPILE_COMMANDS_PATH
-            variable in the .pro file.
-
-            A directory specified on the command line takes precedence. If you
-            do not specify a path, \c lupdate searches for the compilation
-            database from all parent paths of the first input file.
-    \row
-        \li \c {-project-roots <directory>...}
-        \li Specify one or more project root directories. Only files
-            below a project root are considered for translation when
-            using the \c -clang-parser option.
     \endtable
 
     \section1 Examples
@@ -451,7 +451,7 @@
     \target lrelease
 
     \previouspage Using lupdate
-    \nextpage Translators
+    \nextpage Using lupdate-pro
 
     \title Using lrelease
 
@@ -512,13 +512,27 @@
         \li Display up-to-date help information and exit.
     \row
         \li \c {-idbased}
-        \li Use IDs instead of source strings for message keying.
+        \li Deprecated. The flag is not required anymore and will be removed
+            in a future version. It was used to enable ID based translation.
     \row
         \li \c {-compress}
         \li Compress the QM files.
     \row
         \li \c {-nounfinished}
         \li Do not include unfinished translations.
+    \row
+        \li \c {-fail-on-invalid}
+        \li Fail if translations failing the following checks are found:
+        \list
+            \li validity check of accelerators
+            \li validity check of surrounding whitespaces
+            \li validity check of ending punctuation
+            \li validity check of place markers
+        \endlist
+            To get more details refer to Qt Linguist help
+    \row
+        \li \c {-fail-on-unfinished}
+        \li Generate an error if unfinished translations are found
     \row
         \li \c {-removeidentical}
         \li If the translated text is the same as the source text, exclude the
@@ -530,11 +544,14 @@
     \row
         \li \c {-project <filename>}
         \li Name of a file containing the project's description in JSON format.
-            You can use the \c lprodump tool to generate the file from a .pro
+            You can use \c{lupdate-pro -dump-json} to generate the file from a .pro
             file.
     \row
         \li \c {-silent}
         \li Do not explain what is being done.
+    \row
+        \li \c {-verbose}
+        \li Explain what is being done (default).
     \row
         \li \c {-version}
         \li Display the version of \c lrelease and exit.
@@ -570,14 +587,705 @@
 */
 
 /*!
-    \page linguist-translators.html
+    \page linguist-lupdate-pro.html
+    \target lupdate-pro
 
     \previouspage Using lrelease
+    \nextpage Using lrelease-pro
+
+    \title Using lupdate-pro
+
+    The \c lupdate-pro command line tool extracts translatable strings from
+    qmake projects (.pro files) and updates TS files. It is specifically
+    designed for qmake-based projects, while \c lupdate works with source
+    files and JSON description files and is build-system agnostic.
+
+    Use \c lupdate-pro when you have a qmake project and want to extract
+    translations based on the project structure defined in your .pro file.
+
+    \section1 lupdate-pro syntax
+
+    \badcode
+    lupdate-pro [options] [project-file]... [-ts ts-files...]
+    \endcode
+
+    Where:
+
+    \list
+        \li \c options means one or several \l {lupdate-pro options}.
+        \li \c project-file is a .pro file to process.
+        \li \c ts-files are the TS files to generate or update.
+    \endlist
+
+    To view the latest help, enter:
+
+    \badcode
+    lupdate-pro -help
+    \endcode
+
+    \section2 lupdate-pro options
+
+    \table
+    \header
+        \li Option
+        \li Action
+    \row
+        \li \c {-help}
+        \li Display up-to-date help information and exit.
+    \row
+        \li \c {-dump-json <file>}
+        \li Generate a JSON project description file without processing
+            translations. This file can be passed to \c lupdate or \c lrelease
+            using the \c {-project} option.
+    \row
+        \li \c {-silent}
+        \li Do not explain what is being done.
+    \row
+        \li \c {-pro <filename>}
+        \li Name of a .pro file. Useful for files with .pro file syntax but
+            different file suffix. Projects are recursed into and merged.
+    \row
+        \li \c {-pro-out <directory>}
+        \li Virtual output directory for processing subsequent .pro files.
+    \row
+        \li \c {-pro-debug}
+        \li Trace processing .pro files. Specify twice for more verbosity.
+    \row
+        \li \c {-ts <ts-file>...}
+        \li Specify the output TS files. This overrides \c TRANSLATIONS.
+    \row
+        \li \c {-no-obsolete}
+        \li Drop all obsolete and vanished strings.
+    \row
+        \li \c {-pluralonly}
+        \li Only include plural form messages.
+    \row
+        \li \c {-no-sort}
+        \li Do not sort contexts in TS files.
+    \row
+        \li \c {-locations {absolute|relative|none}}
+        \li Specify or override the way to save source code references in TS
+            files.
+    \row
+        \li \c {-no-ui-lines}
+        \li Do not record line numbers in references to UI files.
+    \row
+        \li \c {-source-language <language>[_<region>]}
+        \li Specify the language of the source strings for new files.
+    \row
+        \li \c {-target-language <language>[_<region>]}
+        \li Specify the language of the translations for new files.
+    \row
+        \li \c {-tr-function-alias <function>{+=,=}<alias>}
+        \li Recognize \c <alias> as an alternative spelling of \c <function>.
+    \row
+        \li \c {-version}
+        \li Display the version of \c lupdate-pro and exit.
+    \endtable
+
+    \section1 Examples
+
+    \section2 Update translations from a qmake project
+
+    \badcode
+    lupdate-pro myproject.pro
+    \endcode
+
+    \section2 Generate JSON project description
+
+    Generate a JSON file describing the project structure for use with
+    \c lupdate or \c lrelease:
+
+    \badcode
+    lupdate-pro myproject.pro -dump-json project.json
+    \endcode
+
+    Then use the generated JSON file with \c lupdate:
+
+    \badcode
+    lupdate -project project.json
+    \endcode
+
+    This two-step workflow is useful when you need to customize the project
+    description or integrate with other tools.
+*/
+
+/*!
+    \page linguist-lrelease-pro.html
+    \target lrelease-pro
+
+    \previouspage Using lupdate-pro
+    \nextpage Using lconvert
+
+    \title Using lrelease-pro
+
+    The \c lrelease-pro command line tool generates QM files from qmake
+    projects (.pro files). It reads the \c TRANSLATIONS variable from the
+    project file and generates the corresponding QM files.
+
+    Use \c lrelease-pro when you have a qmake project and want to generate
+    QM files based on the translations defined in your .pro file.
+
+    \section1 lrelease-pro syntax
+
+    \badcode
+    lrelease-pro [options] [project-file]...
+    \endcode
+
+    Where:
+
+    \list
+        \li \c options means one or several \l {lrelease-pro options}.
+        \li \c project-file is a .pro file to process.
+    \endlist
+
+    To view the latest help, enter:
+
+    \badcode
+    lrelease-pro -help
+    \endcode
+
+    \section2 lrelease-pro options
+
+    \table
+    \header
+        \li Option
+        \li Action
+    \row
+        \li \c {-help}
+        \li Display up-to-date help information and exit.
+    \row
+        \li \c {-dump-json <file>}
+        \li Generate a JSON project description file without generating
+            QM files. This file can be passed to \c lrelease using the
+            \c {-project} option.
+    \row
+        \li \c {-silent}
+        \li Do not explain what is being done.
+    \row
+        \li \c {-removeidentical}
+        \li If the translated text is the same as the source text, exclude the
+            message.
+    \row
+        \li \c {-fail-on-unfinished}
+        \li Generate an error if unfinished translations are found.
+    \row
+        \li \c {-fail-on-invalid}
+        \li Fail if translations failing the following checks are found:
+        \list
+            \li validity check of accelerators
+            \li validity check of surrounding whitespaces
+            \li validity check of ending punctuation
+            \li validity check of place markers
+        \endlist
+            To get more details refer to Qt Linguist help
+    \row
+        \li \c {-nounfinished}
+        \li Do not include unfinished translations.
+    \row
+        \li \c {-markuntranslated <prefix>}
+        \li If a message has no real translation, use the source text
+            prefixed with the given string instead.
+    \row
+        \li \c {-version}
+        \li Display the version of \c lrelease-pro and exit.
+    \endtable
+
+    \section1 Examples
+
+    \section2 Generate QM files from a qmake project
+
+    \badcode
+    lrelease-pro myproject.pro
+    \endcode
+
+    \section2 Generate JSON project description
+
+    Generate a JSON file describing the project's translations:
+
+    \badcode
+    lrelease-pro myproject.pro -dump-json project.json
+    \endcode
+
+    Then use the generated JSON file with \c lrelease:
+
+    \badcode
+    lrelease -project project.json
+    \endcode
+*/
+
+/*!
+    \page linguist-lconvert.html
+    \target lconvert
+
+    \previouspage Using lrelease-pro
+    \nextpage Using lcheck
+
+    \title Using lconvert
+
+    The \c lconvert command line tool filters and converts translation data
+    files.
+
+    It supports the following file formats:
+    \list
+        \li \c pot - GNU Gettext localization template files
+        \li \c qph - Qt Linguist Phrase Book
+        \li \c ts  - Qt translation sources
+        \li \c po  - GNU Gettext localization files
+        \li \c qm  - Compiled Qt translations
+        \li \c xlf - XLIFF localization files
+    \endlist
+
+    \section1 lconvert syntax
+
+    \badcode
+    lconvert [options] <infile> [<infile>...]
+    \endcode
+
+    Where:
+
+    \list
+        \li \c options means one or several \l {lconvert options}.
+        \li \c infile is an input file. You can specify multiple input files.
+    \endlist
+
+    If you specify multiple input files, they are merged with translations from
+    later files taking precedence.
+
+    To view the latest \c lconvert help, enter:
+
+    \badcode
+    lconvert -help
+    \endcode
+
+    \section2 lconvert options
+
+    \table
+    \header
+        \li Option
+        \li Action
+    \row
+        \li \c -h \br \c -help
+        \li Display up-to-date help information and exit.
+    \row
+        \li \c {-i <infile>} \br \c {-input-file <infile>}
+        \li Specify an input file. Use this option if \c{<infile>} starts with a dash.
+            Use this option several times to merge inputs.
+            May be \c {-} (standard input) for use in a pipe.
+    \row
+        \li \c {-o <outfile>} \br \c {-output-file <outfile>}
+        \li Specify an output file. Default is \c {-} (standard output).
+    \row
+        \li \c {-if <informat>} \br \c {-input-format <format>}
+        \li Specify input format for subsequent input files.
+            The format is auto-detected from the file name and defaults to \c ts.
+    \row
+         \li \c {-of <outformat>} \br \c {-output-format <outformat>}
+         \li Specify output format. See \c -if.
+    \row
+        \li \c {-drop-tags <regexp>}
+        \li Drop named extra tags when writing \c TS or \c XLIFF files.
+            You can specify this option repeatedly.
+    \row
+        \li \c {-drop-translations}
+        \li Drop existing translations and reset the status to \c unfinished.
+            That implies \c {--no-obsolete}.
+    \row
+        \li \c {-source-language <language>[_<region>]}
+        \li Specify/override the language of the source strings. Defaults to
+            POSIX if not specified and the file does not name it yet.
+    \row
+        \li \c {-target-language <language>[_<region>]}
+        \li Specify or override the language of the translation.
+            By default, the target language is read from the file content or
+            guessed from the file name.
+    \row
+        \li \c {-no-obsolete}
+        \li Drop obsolete messages.
+    \row
+         \li \c {-no-finished}
+         \li Drop finished messages.
+    \row
+        \li \c {-no-untranslated}
+        \li Drop untranslated messages.
+    \row
+        \li \c {-sort-contexts}
+        \li Sort contexts in the output \c TS file alphabetically.
+    \row
+        \li \c {-sort-messages}
+        \li Sort messages in a context alphabetically in \c TS files.
+    \row
+        \li \c {-locations {absolute|relative|none}}
+        \li Override how source code references are saved in \c TS files.
+            Default is \c absolute.
+    \row
+        \li \c {-no-ui-lines}
+        \li Drop line numbers from references to \c UI files.
+    \row
+        \li \c {-pluralonly}
+        \li Drop non-plural form messages.
+    \row
+        \li \c {-verbose}
+        \li Explain what is being done.
+    \endtable
+
+    \section1 Examples
+
+    \section2 Convert TS file to XLIFF
+
+    To convert a single TS file to XLIFF, run the following command in the
+    terminal:
+
+    \badcode
+    lconvert -o myapp_de.xlf myapp_de.ts
+    \endcode
+
+    \section2 Merge multiple QM files
+
+    The following command merges multiple QM files into \c {full_de.qm}:
+
+    \badcode
+    lconvert -o full_de.qm qtbase_de.qm myapp_de.qm mylib_de.qm
+    \endcode
+
+    \section2 Using lconvert with CMake
+
+    To call \c lconvert when configuring or building your CMake project, load
+    the \c Qt6LinguistTools package and use \c
+    {$<TARGET_FILE_NAME:Qt6::lconvert>} for locating the \c lconvert executable.
+
+    The following example adds a custom target \c xlf_de that converts a single
+    TS file to XLIFF.
+
+    \badcode
+    find_package(Qt6 REQUIRED COMPONENTS LinguistTools)
+
+    add_custom_command(
+        OUTPUT myapp_de.xlf
+        COMMAND $<TARGET_FILE:Qt6::lconvert> -o myapp_de.xlf myapp_de.ts
+        DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/myapp_de.ts"
+        VERBATIM
+    )
+
+    add_custom_target(xlf_de
+        DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/myapp_de.xlf"
+    )
+    \endcode
+
+    \section1 PO format-specific options
+
+    When converting to PO format, you can disable automatic line wrapping
+    by setting the \c no-wrap flag in the \c po-flags extra metadata field.
+    By default, lines longer than 79 characters are wrapped. Set this field
+    in source code using the \l{Extra metadata (//~)}{//~ meta string}
+    (for example, \c{//~ po-flags no-wrap}) or directly in TS files using
+    the \c{<extra-po-flags>} element.
+
+    Other PO flags (see the
+    \l{https://www.gnu.org/software/gettext/manual/gettext.html#Sticky-flags-1}{GNU gettext documentation})
+    are preserved when converting between TS and PO formats but do not
+    affect \c lconvert processing.
+
+    \note The \c po-flags metadata is only preserved when converting directly
+    from TS to PO format.
+*/
+
+/*!
+\page linguist-lcheck.html
+\target lcheck
+\previouspage Using lconvert
+\nextpage Using ltext2id
+
+\title Using lcheck
+
+The \c lcheck command line tool validates Qt \c {TS} translation files and
+produces a human-readable report. It is part of the Qt Linguist toolchain
+and is intended for batch or CI usage to catch common localization issues
+early. By default, \c lcheck runs a set of checks and returns a non-zero
+exit code if at least one enabled check fails.
+
+The default checks are:
+
+\list
+    \li \b Accelerator check — Verifies that the number of ampersands
+        (mnemonics) in source and translation match.
+    \li \b Surrounding whitespace check — Verifies that leading and trailing
+        whitespace of source and translation match.
+    \li \b Ending punctuation check — Verifies that source and translation
+        end with the same punctuation.
+    \li \b Place marker check — Verifies consistent usage of \c {%1}, \c {%2},
+        and so on, between source and translation.
+\endlist
+
+Each check can be disabled individually using command line options.
+
+\section1 lcheck syntax
+
+\badcode
+lcheck [options] -o report-output-file ts-file
+lcheck [options] ts-file
+\endcode
+
+Where:
+
+\list
+    \li \c options means one or several \l {lcheck options}.
+    \li \c ts-file is the \c {TS} file to validate.
+    \li \c report-output-file is the path of the file to write the report to.
+        If omitted, the report is written to the standard error stream.
+\endlist
+
+To view the latest help, enter:
+
+\badcode
+lcheck -help
+\endcode
+
+\section2 lcheck options
+
+\table
+\header
+    \li Option
+    \li Action
+\row
+    \li \c {-help}
+    \li Display up-to-date help information and exit.
+\row
+    \li \c {-no-accelerator}
+    \li Disable the accelerator (ampersand) consistency check.
+\row
+    \li \c {-no-punctuation}
+    \li Disable the ending punctuation consistency check.
+\row
+    \li \c {-no-place-marker}
+    \li Disable the check that ensures \c {%1}, \c {%2}, … are used
+        consistently between source and translation.
+\row
+    \li \c {-no-whitespaces}
+    \li Disable the surrounding whitespace consistency check.
+\row
+    \li \c {-check-finished}
+    \li Also check messages marked as \e finished. By default, finished
+        translations are not checked.
+\row
+    \li \c {-o <outfile>}
+    \li Write the validation report to \c <outfile>. If not specified, the
+        report is written to standard error.
+\row
+    \li \c {-version}
+    \li Display the version of \c lcheck and exit.
+\endtable
+
+\note The process exit status is non-zero if any enabled check fails. This
+makes \c lcheck suitable for use in CI pipelines.
+
+\section1 Examples
+
+\section2 Write a report to a file
+
+\badcode
+lcheck -o lcheck_report.txt translations/myapp_de.ts
+\endcode
+
+\section2 Disable selected checks
+
+The following command runs all checks except accelerator and punctuation:
+
+\badcode
+lcheck -no-accelerator -no-punctuation translations/myapp_de.ts
+\endcode
+
+\section2 Check finished translations as well
+
+\badcode
+lcheck -check-finished translations/myapp_de.ts
+\endcode
+
+\section2 Use lcheck in a CI step
+
+\badcode
+lcheck translations/myapp_de.ts && echo "Translations OK" || echo "Issues found"
+\endcode
+
+\section2 Using lcheck with CMake
+
+To call \c lcheck when configuring or building your CMake project, load
+the \c Qt6LinguistTools package and use \c {$<TARGET_FILE:Qt6::lcheck>}
+to locate the \c lcheck executable.
+
+The following example adds a custom target \c check_translations that runs
+\c lcheck over a TS file and writes a report next to the build artifacts.
+
+\badcode
+find_package(Qt6 REQUIRED COMPONENTS LinguistTools)
+
+add_custom_command(
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/lcheck_report.txt"
+    COMMAND $<TARGET_FILE:Qt6::lcheck>
+            -o "${CMAKE_CURRENT_BINARY_DIR}/lcheck_report.txt"
+            "${CMAKE_CURRENT_SOURCE_DIR}/translations/myapp_de.ts"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/translations/myapp_de.ts"
+    VERBATIM
+)
+
+add_custom_target(check_translations
+    DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/lcheck_report.txt"
+)
+\endcode
+
+\section2 Using lcheck with qmake
+
+You can run \c lcheck directly on a TS file without specifying a project file:
+
+\badcode
+lcheck translations/myapp_de.ts
+\endcode
+*/
+
+/*!
+\page linguist-ltext2id.html
+\target ltext2id
+\previouspage Using lcheck
+\nextpage Translators
+
+\title Using ltext2id
+
+The \c ltext2id command line tool converts a project that uses
+text-based translations to use ID-based translations. It scans the
+project tree, updates source code to call the ID-based translation
+APIs, and adjusts the related \c {TS} files accordingly. In the case
+of any failed conversions, the source will be annotated with
+\c {//ltext2id error:} at the failed locations.
+
+\note Make a full backup (or work on a clean Git branch) before
+running \c ltext2id. The tool modifies source files and \c {TS} files
+in place.
+
+For best results, include both the sources and the \c {TS} files in
+the project root you pass to the tool so that updates stay consistent
+between code and translations.
+
+\section1 ltext2id syntax
+
+\badcode
+ltext2id [options] [project-root]
+\endcode
+
+Where:
+
+\list
+    \li \c options means one or several \l {ltext2id options}.
+    \li \c project-root is the directory to process recursively.
+\endlist
+
+To view the latest help, enter:
+
+\badcode
+ltext2id -help
+\endcode
+
+\section2 ltext2id options
+
+\table
+\header
+ \li Option
+ \li Action
+\row
+ \li \c {-help}
+ \li Display up-to-date help information and exit.
+\row
+    \li \c {-no-labels}
+    \li Do not generate labels for ID-based translations.
+        By default, message contexts are used as labels so that
+        entries keep a similar visualization in Qt Linguist.
+\row
+    \li \c {-sort-messages}
+    \li Sort messages in a context alphabetically in TS files.
+\row
+    \li \c {-source-utf16}
+    \li Treat source files as UTF-16 encoded (default: false).
+\row
+    \li \c {-quiet}
+    \li Suppress progress output.
+\row
+    \li \c {-only-meta-id}
+    \li Only suggest IDs by inserting meta strings; do \e not perform
+        the actual transformation to ID-based calls.
+\row
+    \li \c {-no-auto-id}
+    \li Do not auto-generate IDs when meta-string IDs are missing.
+        Translation function calls without meta IDs are ignored.
+\row
+    \li \c {-version}
+    \li Display the version of \c ltext2id and exit.
+\endtable
+
+\section1 Examples
+
+\section2 Convert a project to ID-based translations
+
+Run the tool at the project root. The source code and \c {TS} files
+under that directory are updated in place.
+
+\badcode
+ltext2id path/to/project
+\endcode
+
+\section2 Generate only ID suggestions (no code changes)
+
+Use \c -only-meta-id to inject meta-string ID suggestions without
+rewriting calls to the ID-based API. As a result, the translation
+calls are annotated by '//~ meta-id <id>' (cpp) meta string
+specifying the suggested IDs (meta ID).
+
+\badcode
+ltext2id -only-meta-id path/to/project
+\endcode
+
+\section2 Disable label generation
+
+Prevent label generation if you do not want contexts mirrored as
+labels in Qt Linguist:
+
+\badcode
+ltext2id -no-labels path/to/project
+\endcode
+
+\section2 Avoid auto-generated IDs
+
+Skip auto-generation for calls missing meta IDs, i.e., IDs
+already specified using the meta string '//~ meta-id <id>' (cpp):
+
+\badcode
+ltext2id -no-auto-id path/to/project
+\endcode
+
+\section2 Work with UTF-16 source files
+
+If your sources are UTF-16 encoded, enable the option:
+
+\badcode
+ltext2id -source-utf16 path/to/project
+\endcode
+
+\section1 Exit status
+
+\c ltext2id returns a non-zero exit code on failure (for example,
+when it encounters an unrecoverable error while transforming files).
+Inspect the in-place source annotations marked with
+\c {//ltext2id error:} to fix the remaining issues.
+*/
+
+/*!
+    \page linguist-translators.html
+
+    \previouspage Using ltext2id
     \nextpage Qt Linguist user interface
 
     \title Translators
 
-    \image front-ui.png
+    \image front-ui.png {UI illustration showing Start buttons, toggle,
+           controls, and a circular selector on a dark screen}
 
     \QL is a tool for translating strings in Qt applications. Once you have
     installed Qt, you can start \QL in the same way as any other application on
@@ -611,12 +1319,13 @@
     \list
         \li \l {Qt Linguist user interface}
         \li \l {Translating strings}
-        \li \l {Selecting context to translate}
+        \li \l {Selecting context or label to translate}
         \li \l {Selecting strings to translate}
         \li \l {Viewing strings in context}
         \li \l {Reusing translations}
         \li \l {Validating translations}
         \li \l {Translating multiple languages simultaneously}
+        \li \l {AI translation}
     \endlist
 */
 
@@ -632,7 +1341,7 @@
 
     \list
 
-        \li \uicontrol Context (\key F6) lists translation contexts.
+        \li \uicontrol Context/Label (\key F6) lists translation contexts or labels.
 
         \li \uicontrol Strings (\key F7) lists translatable strings in the
             selected context.
@@ -651,7 +1360,7 @@
 
     \endlist
 
-    \image linguist-linguist.png {Qt Linguist UI}
+    \image linguist.webp {Qt Linguist UI}
 
     The translation area (1) is always visible. To show or hide the other views,
     select \uicontrol View > \uicontrol Views, or use keyboard shortcuts.
@@ -663,7 +1372,7 @@
     \page linguist-translating-strings.html
 
     \previouspage Qt Linguist user interface
-    \nextpage Selecting context to translate
+    \nextpage Selecting context or label to translate
 
     \title Translating strings
 
@@ -688,7 +1397,6 @@
     \uicontrol {Developer comments} field.
 
     To translate strings:
-
     \list 1
 
         \li Select \uicontrol File > \uicontrol Open to load a TS file.
@@ -696,7 +1404,7 @@
         \li Select a context in the \uicontrol Context view to display translatable
             strings in the \uicontrol Strings view.
 
-            \image linguist-ui.webp {Two TS files open in Qt Linguist}
+            \image linguist-ui.webp {}
 
         \li Select a string to display it in the \uicontrol {Source text} field
             in the translation area. The whitespace within the source text is
@@ -715,7 +1423,7 @@
             \uicontrol {Translator comment} field.
 
         \li To accept the translation, press \key {Ctrl+Enter}, select
-            \inlineimage linguist-doneandnext.png
+            \inlineimage linguist-doneandnext.png {Icon}
             , or click the icon to the left of the selected source string in the
             string list.
 
@@ -724,9 +1432,9 @@
     \endlist
 
     Repeat this process until all strings in the string list are marked with
-    \inlineimage linguist-check-on.png
+    \inlineimage linguist-check-on.png {Check icon}
     (\uicontrol {Accepted/Correct}) or
-    \inlineimage linguist-check-warning.png
+    \inlineimage linguist-check-warning.png {Check warning icon}
     (\uicontrol {Accepted/Warnings}). Then select the next context and continue.
 
     To view the number of words and characters in the source text and in the
@@ -745,10 +1453,10 @@
     \section1 Moving between translatable strings
 
     To move to the next unfinished translation, select
-    \inlineimage nextunfinished.png
+    \inlineimage nextunfinished.png {Icon}
     (\uicontrol {Next Unfinished}) or press \key{Ctrl+J}.
 
-    To move to the next source text, select \inlineimage next.png
+    To move to the next source text, select \inlineimage next.png {next icon}
     , press \key{Ctrl+Shift+J}, or select \uicontrol Translation >
     \uicontrol Next.
 
@@ -844,6 +1552,17 @@
     available in the translation area. For more information, see
     \l{Writing Source Code for Translation}.
 
+    \section1 Handling numeric character references (NCR) in translations
+
+    Select \uicontrol {NCR mode} to toggle the representation of
+    numeric character references in both the source text and the translation
+    fields. When selected, special characters in the text are displayed as their
+    corresponding NCRs (for example, \c{&#160;} for a non-breaking space).
+    Otherwise, the
+    characters appear in their standard visual form. This feature is useful
+    for instance to maintain the same special characters (such as
+    emojis, special spaces) in both the source text and its translations.
+
     \section1 Changing the target locale
 
     You can set the locale information explicitly in \uicontrol Edit >
@@ -868,7 +1587,8 @@
     translations for the current locale automatically. For more information, see
     \l{Enable Translation}.
 
-    \image linguist-translationfilesettings.png
+    \image linguist-translationfilesettings.png {Screenshot showing Qt Linguist
+           settings window with source language POSIX and target language German}
 */
 
 /*!
@@ -877,22 +1597,27 @@
     \previouspage Translating strings
     \nextpage Selecting strings to translate
 
-    \title Selecting context to translate
+    \title Selecting context or label to translate
 
-    The \uicontrol Context view lists the contexts in which strings to be translated
-    appear. The column labeled \uicontrol Context lists the context names in
+    The \uicontrol Context/Label view lists the contexts (\uicontrol {Text based}) or
+    labels (\uicontrol {ID based}) in which strings to be translated
+    appear. The text-based translations are grouped into contexts, while ID-based
+    translations are grouped into labels (see \l{Grouping ID-Based Translations}).
+    The \uicontrol Context/Label lists the \e groups (that is, context or labels)
+    based on the selected tab:
+    \list
+    \li Upon switching to the \uicontrol{Text-Based} tab,
+    \uicontrol Context lists the context names in
     alphabetical order. Each context is the name of a QML type or a subclass of
     QObject.
+    \li Upon switching to the \uicontrol{ID-Based} tab,
+    \uicontrol Label lists the label names in
+    alphabetical order. More info on labels can be found in \l{Grouping ID-Based Translations}.
+    \endlist
 
-    \image linguist-context-view.webp {Context view}
+    \image linguist-context-view.webp {Context/Label view}
 
-    A context for QObject itself contains strings passed to the static function
-    QObject::tr().
-
-    An \e{<unnamed context>} contains strings that are not in a subclass of
-    QObject.
-
-    The following icons indicate the current translation state for each context:
+    The following icons indicate the current translation state for each group:
 
     \table
     \header
@@ -902,47 +1627,47 @@
 
     \row
     \li Accepted/Correct
-    \li \inlineimage linguist-check-on.png
-    \li All strings in the context have been translated, and all the
+    \li \inlineimage linguist-check-on.png {Check icon}
+    \li All strings in the group have been translated, and all the
         translations passed the \l{Validating Translations}{validation tests}.
 
     \row
     \li Accepted/Warnings
-    \li \inlineimage linguist-check-warning.png
-    \li All strings in the context have been translated or marked as translated,
+    \li \inlineimage linguist-check-warning.png {Check warning icon}
+    \li All strings in the group have been translated or marked as translated,
         but at least one translation failed the validation tests.
         In the \uicontrol Strings view, you can see which string failed the test.
 
     \row
     \li Not Accepted
-    \li \inlineimage linguist-check-off.png
-    \li At least one string in the context has not been translated or is not
+    \li \inlineimage linguist-check-off.png {check off icon}
+    \li At least one string in the group has not been translated or is not
         marked as translated.
 
     \row
     \li Obsolete
-    \li \inlineimage linguist-check-obsolete.png
-    \li None of the translated strings appears in the context any more. This
-        usually means the context no longer exists in the application.
+    \li \inlineimage linguist-check-obsolete.png {check obsolete icon}
+    \li None of the translated strings appears in the group any more. This
+        usually means the context or label no longer exists in the application.
     \endtable
 
     The \uicontrol Items column displays the total number of translatable strings in
-    the context and the number of translated strings, separated by a slash (/).
-    If the numbers are equal, all the translatable strings in the context have
+    the group and the number of translated strings, separated by a slash (/).
+    If the numbers are equal, all the translatable strings in the group have
     translations.
 */
 
 /*!
     \page linguist-selecting-strings.html
 
-    \previouspage Selecting context to translate
+    \previouspage Selecting context or label to translate
     \nextpage Viewing strings in context
 
     \title Selecting strings to translate
 
     The \uicontrol Strings view lists all the translatable strings in the
-    current context and their translation acceptance state. Select a string
-    to view and edit it in the translation area.
+    current group (that is, context or label) and their translation acceptance
+    state. Select a string to view and edit it in the translation area.
 
     \image linguist-strings-view.webp {Strings view}
 
@@ -963,7 +1688,7 @@
 
     \row
     \li Accepted/Correct
-    \li \inlineimage linguist-check-on.png
+    \li \inlineimage linguist-check-on.png {Check icon}
     \li The source string has a translation (possibly empty). You accepted
         the translation, and it passes all the \l{Validating Translations}
         {validation tests}. Click the icon to revoke acceptance of the
@@ -974,7 +1699,7 @@
 
     \row
     \li Accepted/Warnings
-    \li \inlineimage linguist-check-warning.png
+    \li \inlineimage linguist-check-warning.png {Check warning icon}
     \li You accepted the translation, but it does not pass all the validation
         tests. The \uicontrol Warnings view shows where it failed. If you click
         the icon to revoke acceptance of the translation, the state becomes
@@ -982,7 +1707,7 @@
 
     \row
     \li Not Accepted
-    \li \inlineimage linguist-check-off.png
+    \li \inlineimage linguist-check-off.png {check off icon}
     \li The string has a translation that passes all the validation tests, but
         you have not yet accepted the translation. Click the icon or press
         \key{Ctrl+Enter} to accept the translation. The state becomes
@@ -990,13 +1715,13 @@
 
     \row
     \li No Translation
-    \li \inlineimage linguist-check-empty.png
+    \li \inlineimage linguist-check-empty.png {check empty icon}
     \li The string does not have a translation. If you click the icon to accept
         the empty translation, the state becomes \uicontrol {Accepted/Correct}.
 
     \row
     \li Validation Failures
-    \li \inlineimage linguist-danger.png
+    \li \inlineimage linguist-danger.png {danger icon}
     \li The string has a translation, but the translation does not pass all the
         validation tests. The \uicontrol Warnings view shows the validation test
         failures. Click on the icon or press \key{Ctrl+Enter} to
@@ -1007,7 +1732,7 @@
 
     \row
     \li Obsolete
-    \li \inlineimage linguist-check-obsolete.png
+    \li \inlineimage linguist-check-obsolete.png {check obsolete icon}
     \li The string is obsolete. It is no longer used in the context.
         See \l{Using lupdate} for instructions on how to remove obsolete
         messages from the file.
@@ -1066,7 +1791,8 @@
 
     \section1 Batch translation
 
-    \image linguist-batchtranslation.png
+    \image linguist-batchtranslation.png {Screenshot showing Qt Linguist batch
+           translation window with options and phrase book selection}
 
     Use the batch translation feature to automatically translate source
     texts that are also in a phrase book. To configure which phrase books to use
@@ -1082,7 +1808,8 @@
 
     To create a new phrase book, select \uicontrol Phrases > \uicontrol {New Phrase Book}.
 
-    \image linguist-phrasebookdialog.png
+    \image linguist-phrasebookdialog.png {Screenshot of Qt Linguist phrase book editor
+           showing source phrases with German translations}
 
     To open a phrase book, select \uicontrol Phrases > \uicontrol {Open Phrase Book}, and
     then select the Qt phrase book file (.qph) to open.
@@ -1160,21 +1887,21 @@
     \target multiple languages
 
     \previouspage Validating translations
-    \nextpage Developers
+    \nextpage AI translation
 
     \title Translating multiple languages simultaneously
 
     You can load and edit multiple translation files simultaneously.
-    The following screen shot displays \e{Polish} and \e{Japanese} translation
+    The following screen shot displays \e{German} and \e{French} translation
     files loaded.
 
-    \image linguist-linguist_2.png
+    \image linguist-linguist_2.webp {}
 
-    The translation area has color-coded text editing areas for both Polish and
-    Japanese. The \uicontrol Context view and the \uicontrol Strings view have
+    The translation area has color-coded text editing areas for both German and
+    French. The \uicontrol Context/Label view and the \uicontrol Strings view have
     color-coded status columns for each language.
 
-    The \uicontrol Items column in the \uicontrol Context view combines the values
+    The \uicontrol Items column in the \uicontrol Context/Label view combines the values
     for both languages. If the number of translatable strings does not match the
     number of accepted strings, either or both languages have strings that you
     need to translate or accept. The \uicontrol Strings view shows the translation
@@ -1182,13 +1909,215 @@
 */
 
 /*!
+ \page linguist-ai-translation.html
+ \target ai translation
+
+ \previouspage Translating multiple languages simultaneously
+ \nextpage Developers
+
+ \title AI translation
+
+ The AI Translation feature lets you automatically generate translations for the
+ open TS file using large language models (LLMs). You can use either a local LLM
+ server (such as \l{https://ollama.com}{Ollama},
+ \l{https://lmstudio.ai}{LM Studio}, or
+ \l{https://github.com/ggml-org/llama.cpp}{llama.cpp}) or cloud-based APIs that
+ support the OpenAI-compatible REST protocol (such as OpenAI, Groq, or Anthropic).
+
+ Qt Linguist supports two API modes:
+ \list
+     \li \e{Ollama} - Ollama's native REST API. Use this when running
+         \l{https://ollama.com}{Ollama} locally.
+     \li \e{OpenAI Compatible} - The standard OpenAI REST API format. Use this for:
+     \list
+         \li Local servers: LM Studio, llama.cpp, or Ollama (which also supports
+             OpenAI-compatible mode)
+         \li Cloud providers: OpenAI, Groq, DeepSeek, and others
+     \endlist
+ \endlist
+
+ \section1 Setting up a local LLM server
+
+ To use AI Translation with a local server, install one of the following and
+ download at least one model:
+
+ \list
+     \li \l{https://ollama.com}{Ollama} - Easy to use, manages models automatically
+     \li \l{https://lmstudio.ai}{LM Studio} - GUI application with model browser
+     \li \l{https://github.com/ggml-org/llama.cpp}{llama.cpp} - Lightweight,
+         runs GGUF models directly
+ \endlist
+
+ \note Running LLMs locally requires sufficient memory depending on the model
+ size and quantization level. Refer to your LLM server's documentation for
+ specific requirements, for example
+ \l{https://lmstudio.ai/docs/app/system-requirements}{LM Studio System Requirements}.
+
+ For Ollama, pull a model using the command line:
+
+ \code
+ ollama pull qwen3:14b
+ ollama serve
+ \endcode
+
+ For LM Studio, download models through the application's interface and start
+ the local server:
+
+ \code
+ lms server start
+ \endcode
+
+ For llama.cpp, you can either use one of the built-in model presets:
+
+ \code
+ llama-server --fim-qwen-7b-default
+ \endcode
+
+ Or download a GGUF model file and start the server manually:
+
+ \code
+ llama-server -m model.gguf --port 8080
+ \endcode
+
+ \section1 Using cloud APIs
+
+ To use cloud-based translation services, select \e{OpenAI Compatible} as the
+ API type, enter the provider's API endpoint URL, and provide your API key.
+
+ Enter only the base URL without the \c{/v1} path suffix. For example, for
+ \l{https://openrouter.ai}{OpenRouter} use \c{https://openrouter.ai/api}.
+ Consult your provider's documentation for the correct endpoint URL.
+
+ \section1 Using the AI Translation dialog
+
+ In Linguist, choose \uicontrol{Tools > AI Translation} to open the
+ AI Translation dialog:
+
+ The \c Configuration part of the dialog provides:
+
+ \list
+     \li \uicontrol {API Type}: choose \e{Ollama} for local Ollama servers using
+         Ollama's native API, or \e{OpenAI Compatible} for LM Studio, llama.cpp,
+         cloud APIs, or Ollama in OpenAI-compatible mode.
+     \li \uicontrol {Server URL}: the base URL where the server listens. Do not
+         include the \c{/v1} path suffix.
+         Default: \c http://localhost:11434 for Ollama,
+         \c http://localhost:8080 for OpenAI Compatible.
+     \li \uicontrol {API Key}: authentication key for cloud APIs (optional for
+         local servers).
+     \li \uicontrol Model: drop-down list of available models.
+     \li \uicontrol Context: optional application context to improve translation
+         accuracy (e.g., "medical software", "video game", "financial application").
+ \endlist
+
+ \image translationDialog1.webp {Screenshot of Qt Linguist AI translation dialog - Configuration}
+
+ The \c Selection part of the dialog provides:
+ \list
+     \li \uicontrol File: the TS file to translate.
+     \li \uicontrol Filter: limit translation to specific groups (contexts or labels).
+     \li \uicontrol Translate: start the AI translation.
+ \endlist
+
+ \image translationDialog2.webp {Screenshot of Qt Linguist AI translation dialog - Selection}
+
+ The \c Progress part of the dialog provides:
+ \list
+     \li A stop button to stop the translation progress
+     \li \uicontrol {Apply Translations}: apply the translated items into the TS file.
+ \endlist
+
+ \image translationDialog3.webp {Screenshot of Qt Linguist AI translation dialog - Progress}
+
+ During translation, progress messages appear in the \uicontrol{Translation Log}.
+ When complete, review the translated texts in the log. Click
+ \uicontrol{Apply Translations} to insert the AI-generated translations into
+ the TS file.
+
+ \section1 Security considerations
+
+ AI translation sends data over the network to the server you configure. Before
+ using it, consider the following:
+
+ \list
+     \li \b{Keep confidential strings off remote servers.} Qt Linguist sends the
+         source strings to translate, and any \uicontrol Context you provide, to
+         the configured server. Use only a server you trust, and prefer a local
+         LLM server.
+     \li \b{Review AI-generated translations before applying them.} Qt Linguist
+         inserts the server's translations as-is. Treat them as untrusted
+         content and review them in the \uicontrol{Translation Log} before
+         choosing \uicontrol{Apply Translations}, as they may contain
+         unexpected markup or format specifiers.
+     \li \b{Prefer HTTPS for remote servers.} Qt Linguist sends the API key as a
+         bearer token in the request. If the \uicontrol{Server URL} uses \c http
+         instead of \c https, anyone on the network path can read the key and
+         source text in cleartext. Use \c https for any server that is not
+         running on your local machine.
+ \endlist
+
+ \section1 Recommended models
+
+ The following models are recommended for translation tasks, balancing quality,
+ speed, and resource usage. These models can be found on:
+
+ \list
+     \li \l{https://ollama.com/library}{Ollama} - search by model name
+         (e.g., \c{ollama pull qwen3:14b})
+     \li \l{https://lmstudio.ai}{LM Studio} - search in the model browser
+     \li \l{https://huggingface.co}{Hugging Face} - download GGUF files for llama.cpp
+ \endlist
+
+ \table
+ \header
+     \li Model
+     \li Size
+     \li Notes
+ \row
+     \li Mistral Small 24B
+     \li 14 GB
+     \li High translation quality with strong multilingual support.
+         Requires >16 GB VRAM for optimal performance.
+ \row
+     \li Qwen3 14B
+     \li 9 GB
+     \li Balance of quality and resource usage. Supports 100+ languages.
+ \row
+     \li Qwen3 30B
+     \li 19 GB
+     \li High-quality translations. Uses MoE architecture for efficient inference.
+ \row
+     \li Qwen2.5 14B
+     \li 9 GB
+     \li Strong multilingual support for 29+ languages including CJK languages.
+ \row
+     \li Gemma 3 12B
+     \li 8 GB
+     \li Supports 140+ languages. Good for resource-constrained systems.
+ \row
+     \li 7shi/llama-translate 8B
+     \li 5 GB
+     \li Specialized translation model for English, French, Chinese, and Japanese.
+         Lightweight option for limited hardware. Available on Ollama only.
+ \endtable
+
+ For systems with limited resources, smaller variants like Qwen3 8B (5 GB) or
+ Qwen2.5 7B (5 GB) provide reasonable translation quality while requiring
+ less memory.
+
+ \note Translation quality varies by language pair and model. Test different
+ models to find the best combination of speed, quality, and resource usage for
+ your specific translation needs.
+*/
+
+/*!
     \page linguist-programmers.html
     \title Developers
 
-    \previouspage Translating multiple languages simultaneously
+    \previouspage AI translation
     \nextpage TS File Format
 
-    \image front-coding.png
+    \image front-coding.png {Illustration showing a code}
 
     Design your application so that it can be adapted to various languages and
     regions without engineering changes.
@@ -1196,6 +2125,7 @@
     \list
         \li \l{TS file format}
         \li \l{Text ID based translations}
+        \li \l{Meta strings reference}
         \li \l{CMake Commands in Qt6 LinguistTools}{CMake commands}
         \li \l{Examples}
     \endlist
@@ -1227,11 +2157,6 @@
     translation:
 
     \list
-    \li \l{hellotr}{Hello tr()} is a C++ application that demonstrates the
-    creation of a \l QTranslator object. It also shows the simplest use of
-    the \c tr() function to mark user-visible source text for
-    translation.
-
     \li \l{arrowpad}{Arrow Pad} is a C++ application that demonstrates how to
     make the application load translations depending on the current locale.
     It also shows the use of the two-argument form of \c tr() which provides
@@ -1240,9 +2165,6 @@
     \li \l{trollprint}{Troll Print} is a C++ application that demonstrates how
     to distinguish identical source text in the same context. It also shows
     how minimize the translator's work when an application is upgraded.
-
-    \li \l{Qt Quick I18N} demonstrates how to internationalize Qt Quick
-    applications.
     \endlist
 */
 
@@ -1277,11 +2199,6 @@
     unique identifier (text ID) that you use in the source code instead of text.
     This makes it much easier to manage large numbers of translated texts.
 
-    \note You must use only plain-text-based or only text-ID-based functions in
-    one application. If you mix them, you will end up with an incomplete set of
-    texts to be translated.
-
-
     \section1 Internationalizing with text IDs
 
     When using text IDs instead of plain text, the general method of
@@ -1291,9 +2208,9 @@
     \list 1
 
         \li The functions and macros for the text-ID-based translation system are
-        different from the plain-text system. You use the \c qsTrId() function instead
-        of qsTr(), the \c QT_TRID_NOOP() macro instead of QT_TR_NOOP(),
-        and \c QT_TRID_N_NOOP() macro instead of QT_TR_N_NOOP()).
+        different from the plain-text system. You use the qsTrId() function instead
+        of qsTr(), the QT_TRID_NOOP() macro instead of QT_TR_NOOP(),
+        and QT_TRID_N_NOOP() macro instead of QT_TR_N_NOOP()).
 
         \li Use text IDs as user interface strings rather than plain text
         strings. For example, \c {qsTrId("id-back-not-front")}
@@ -1302,6 +2219,9 @@
         identically spelled words with different meanings need separate
         text IDs. For example, \c {qsTrId("id-back-backstep")} differentiates
         the back-step \e {Back} from the \c id-back-not-front \e {Back}.
+
+        \li Since context names are not allowed for text-ID-based translations,
+        \QL lists the IDs in a file without context names.
 
         \li The \e {engineering English} text that you see in the user interface for
         development builds is indicated with a \c {//%} comment. If you do not
@@ -1371,12 +2291,7 @@
     </message>
     \endcode
 
-    When using \l{Using lrelease}{lrelease}, you need to specify that the keys
-    for translated texts are based on text IDs, rather than plain text. If you
-    use \c qsTr() to mark the strings as translatable in the code, the \c id
-    attribute is not set and \c lrelease ignores them.
-
-    However, if there is no translation available for a given text (which is
+    If there is no translation available for a given text (which is
     generally the case until late in development), the text ID will be shown in
     the user interface rather than a proper text. In order to make the application
     more usable for testing, you can make \c lrelease use the \e {Engineering English}
@@ -1384,20 +2299,125 @@
     some indicator, such as an exclamation mark (!), so you can see texts that
     are not yet translated.
 
+    \section2 Grouping ID-Based Translations
+
+    You can assign each ID-based translation a \e label to organize
+    ID-based entries of large projects into smaller groups.
+    To assign a \e label to an ID-based entry, add a \c{//@} comment
+    naming the label, for example in C++:
+    \code cpp
+    //% "Open file"
+    //@ FileOperations
+    qtTrId("msg.open");
+    \endcode
+    Or in QML:
+    \code qml
+    //% "Open file"
+    //@ FileOperations
+    qsTrId("msg.open");
+    \endcode
+    When you open the TS file in \l {Qt Linguist}, the ID-based entries with
+    the same \e label are grouped together, similar to text-based
+    entries that are grouped by context.
+    Any item without a \e label appears under \c{<unnamed label>}.
+    \note Label names have no effect on lookup or uniqueness: IDs remain globally
+    unique and can still be loaded via \c{qtTrId("msgid")} without referencing a
+    label. The label tag is used only to improve the translator's navigation
+    and does not change runtime behavior.
+
+    \section3 Automatic Label Generation
+
+    Instead of manually specifying label names, you can use placeholders
+    to automatically generate labels based on the code structure:
+
+    \list
+    \li \c{//@ <context>} - Automatically uses the full context (namespace::class)
+    \li \c{//@ <class>} - Automatically uses only the class name (without namespaces)
+    \li \c{//@ <file>} - Automatically uses the source filename
+    \endlist
+
+    \section4 Combining Placeholders
+
+    Placeholders can be combined with custom text to create more descriptive labels:
+
+    \list
+    \li \c{//@ <file>:<class>} - Combines filename and class: \c{filehandler.cpp:FileHandler}
+    \li \c{//@ <context>_customSuffix} - Adds suffix: \c{MyApp::FileHandler_customSuffix}
+    \li \c{//@ module_<file>_<class>-label} - Custom prefix and suffix: \c{module_filehandler.cpp_FileHandler-label}
+    \li \c{//@ <context>:<file>} - Context with file: \c{MyApp::FileHandler:filehandler.cpp}
+    \endlist
+
+    For example, in C++:
+    \code cpp
+    namespace MyApp {
+    class FileHandler : QObject {
+        Q_OBJECT
+        void open() {
+            //% "Open file"
+            //@ <context>
+            qtTrId("msg.open"); // Label: MyApp::FileHandler
+
+            //% "Save file"
+            //@ <class>
+            qtTrId("msg.save"); // Label: FileHandler
+
+            //% "Export"
+            //@ <file>
+            qtTrId("msg.export"); // Label: filehandler.cpp
+        }
+    };
+    }
+    \endcode
+
+    Or in QML:
+    \code qml
+    Item {
+        id: myComponent
+        Component.onCompleted: {
+            //% "Loading"
+            //@ <context>
+            qsTrId("msg.loading") // Label: <component-name>
+
+            //% "Ready"
+            //@ <file>
+            qsTrId("msg.ready") // Label: main.qml
+
+            //% "Initialized"
+            //@ <file>:<context>-state
+            qsTrId("msg.init") // Label: main.qml:<component-name>-state
+        }
+    }
+    \endcode
+
+    Auto labels are particularly useful in large projects where manually
+    managing label names across many files can be tedious. They ensure
+    consistent grouping based on code structure and give hints to translators
+    about where the translation will be used.
+
+    \note When using \c{<class>} in C++ code outside any classes, a warning
+    will be issued and \c{<unnamed>} will be used in the generated label.
+
+    \note Using \c{<class>} in QML will generate a
+    warning and \c{<unnamed>} will be used, since QML
+    components are not classes. Use \c{<context>} instead to get the
+    component name, or \c{<file>} to get the QML filename.
+
+    \note Auto labels only work with ID-based translations (\c qtTrId, \c qsTrId).
+    Using auto labels with text-based translations (\c tr, \c qsTr) will generate
+    a warning and the label will be ignored.
+
     \section1 CMake configuration
 
     When building with CMake, use the prefix \c qml_ for .ts files.
     For example, \c qml_en.ts. In the CMakeLists.txt file, add the
     \l qt_add_translations function, where you list the *.ts files
-    as values of \c TS_FILES, set the value of RESOURCE_PREFIX to the
-    URI of the main.qml file for the project followed by /i18n, and
-    set the value of \c LRELEASE_OPTIONS to \c -idbased:
+    as values of \c TS_FILES, and set the value of RESOURCE_PREFIX to the
+    URI of the main.qml file for the project followed by /i18n:
 
     \badcode
     qt_add_translations(${CMAKE_PROJECT_NAME}
         TS_FILES i18n/qml_de_DE.ts i18n/qml_en_US.ts
         RESOURCE_PREFIX Main/i18n
-        LRELEASE_OPTIONS -idbased
     )
     \endcode
 
@@ -1419,9 +2439,347 @@
     The generation of the final .qm files could be scripted something like this:
 
     \code
-    lrelease -idbased <project-dir>/i18n/myapp-text_en_GB.ts
-    lrelease -idbased <project-dir>/i18n/myapp-text_en_US.ts
+    lrelease <project-dir>/i18n/myapp-text_en_GB.ts
+    lrelease <project-dir>/i18n/myapp-text_en_US.ts
     ...
     \endcode
 
+*/
+
+/*!
+    \page linguist-meta-strings-reference.html
+    \title Meta strings reference
+    \ingroup internationalization
+
+    \previouspage Text ID based translations
+
+    \brief Reference guide for meta strings used in Qt's translation system.
+
+    Meta strings are special comments that provide additional information to
+    lupdate and \QL for translation processing. They use specific
+    prefixes to identify their purpose and can be used in C++, QML, and Python code.
+
+    \section1 Meta string syntax overview
+
+    Meta strings are special comments that use specific prefixes to provide lupdate
+    with additional information about translations:
+
+    \table
+      \header
+          \li Meta String
+          \li Purpose
+          \li Usage
+      \row
+          \li \c{//:}
+          \li Extra comment for translators
+          \li Provides context and guidance to help translators
+      \row
+          \li \c{//%}
+          \li Source text (engineering English)
+          \li Defines display text for ID-based translations during development
+      \row
+          \li \c{//@}
+          \li Label for grouping
+          \li Organizes ID-based translations into logical groups
+      \row
+          \li \c{//~}
+          \li Extra key-value metadata
+          \li Stores additional custom information about the translation
+      \row
+          \li \c{// TRANSLATOR}
+          \li Magic comment for context
+          \li Provides context information about the class or file
+    \endtable
+
+    \note The \c{//=} meta string for message ID mapping is deprecated and should not be used in new code.
+
+    \section1 Translator comments (//:)
+
+    Use \c{//:} comments to provide additional context and guidance to translators.
+    These comments appear in the \QL translation interface and help
+    translators understand the meaning and usage of the text.
+
+    \section2 C++ example
+    \code cpp
+    //: Button to navigate backwards in the application
+    tr("Back");
+
+    //: This is a file menu item that opens an existing document.
+    //: Keep translation short to fit in menu.
+    tr("Open");
+    \endcode
+
+    \section2 QML example
+    \code qml
+    Button {
+      //: Emergency stop button - must be clearly visible
+      text: qsTr("STOP")
+    }
+    \endcode
+
+    \section2 Python example
+    \code python
+    #: Button to navigate backwards in the application
+    self.tr("Back")
+
+    #: This is a file menu item that opens an existing document.
+    #: Keep translation short to fit in menu.
+    self.tr("Open")
+    \endcode
+
+    Multiple translator comments can be used for the same string and will be
+    concatenated with newlines in the TS file.
+
+    \section2 TS file format
+
+    Translator comments appear as \c{<extracomment>} elements in the TS file:
+
+    \code xml
+    <message>
+        <source>Back</source>
+        <extracomment>Button to navigate backwards in the application</extracomment>
+        <translation type="unfinished"></translation>
+    </message>
+    \endcode
+
+    \section1 Source text (//%)
+
+    The \c{//%} meta string defines the \e{engineering English} text that appears
+    in the user interface during development when using ID-based translations.
+    This is essential for making the application usable before translations
+    are complete.
+
+    \section2 C++ example
+    \code cpp
+    //% "Save Document"
+    qtTrId("file.save");
+
+    //% "Found %n items"
+    qtTrId("search.results", count);
+    \endcode
+
+    \section2 QML example
+    \code qml
+    Text {
+      //% "Welcome to the application"
+      text: qsTrId("welcome.message")
+    }
+    \endcode
+
+    \section2 Important notes
+    \list
+      \li Include parameter placeholders (%1, %n) in the source text
+      \li The source text should be production-ready English
+      \li Without //% comments, the text ID itself appears in the UI
+    \endlist
+
+    \section2 TS file format
+
+    Source text appears as the \c{<source>} element:
+
+    \code xml
+    <message id="file.save">
+        <source>Save Document</source>
+        <translation type="unfinished"></translation>
+    </message>
+    \endcode
+
+    \section1 Labels (//@)
+
+    Use \c{//@} meta strings to organize ID-based translations into logical
+    groups or categories within \QL. This is particularly useful
+    for large projects with many translation strings.
+
+    \note The \c{//@} meta string is only intended for ID-based translations
+    (qtTrId/qsTrId) and should not be used with text-based translations (tr/qsTr).
+
+    \section2 C++ example
+    \code cpp
+    //% "New Document"
+    //@ FileOperations
+    qtTrId("file.new");
+
+    //% "Print Document"
+    //@ FileOperations
+    qtTrId("file.print");
+
+    //% "Connection failed"
+    //@ NetworkErrors
+    qtTrId("network.error.connection");
+    \endcode
+
+    \section2 QML example
+    \code qml
+    Button {
+      //% "Login"
+      //@ Authentication
+      text: qsTrId("auth.login")
+    }
+    \endcode
+
+    \note Labels are not applicable to Python translations since Python only supports
+    text-based translations (self.tr()) and not ID-based translations.
+
+    Strings with the same label appear grouped together in \QL,
+    making it easier for translators to work on related content.
+
+    For automatic label generation using placeholders like \c{<context>}, \c{<class>},
+    \c{<file>}, and their combinations, see \l{Automatic Label Generation}.
+
+    \section2 TS file format
+
+    Labels appear as a \c{label} element:
+
+    \code xml
+    <message id="file.new" label="FileOperations">
+        <source>New Document</source>
+        <label>FileOperations</label>
+        <translation type="unfinished"></translation>
+    </message>
+    \endcode
+
+    \section1 Extra metadata (//~)
+
+    The \c{//~} meta string allows you to attach arbitrary key-value metadata
+    to translations. This can be used for custom processing or translator
+    guidance.
+
+    \section2 Syntax
+    \code
+    //~ key value
+    //~ key "quoted value with spaces"
+    \endcode
+
+    \section2 C++ example
+    \code cpp
+    //% "Error"
+    //: Critical system error dialog
+    //~ Severity High
+    //~ MaxLength "20"
+    //~ Context "Error dialogs"
+    qtTrId("system.error");
+    \endcode
+
+    \section2 QML example
+    \code qml
+    Text {
+      //% "Loading..."
+      //~ Context "Progress indicators"
+      //~ ShowDuration "true"
+      text: qsTrId("progress.loading")
+    }
+    \endcode
+
+    \section2 Python example
+    \code python
+    #~ Severity High
+    #~ Context "Error dialogs"
+    self.tr("Critical system error")
+    \endcode
+
+    \section2 TS file format
+
+    Extra metadata appears as \c{<extra-*>} elements in the TS file and can be
+    processed by custom tools or translation workflows.
+
+    \code xml
+    <message id="system.error">
+        <source>Error</source>
+        <comment>Critical system error dialog</comment>
+        <translation type="unfinished"></translation>
+        <extra-Severity>High</extra-Severity>
+        <extra-MaxLength>20</extra-MaxLength>
+        <extra-Context>Error dialogs</extra-Context>
+    </message>
+    \endcode
+
+    \section2 Recognized extra keys
+
+    While any key can be used with \c{//~}, the \c no-wrap flag within
+    \c po-flags is recognized by \c lconvert. See \l{PO format-specific options}.
+
+    \section1 TRANSLATOR magic comments
+
+    \c{TRANSLATOR} comments provide context information about a class or
+    source file to help translators understand where translations are used.
+
+    \section2 C++ example
+    \snippet doc_src_linguist-manual.cpp 5
+
+    \section2 QML example
+    \code qml
+    // TRANSLATOR LoginDialog Login dialog for user authentication
+    Item {
+      Text {
+          text: qsTr("Username")
+      }
+    }
+    \endcode
+
+    \section2 Python example
+    \code python
+    # TRANSLATOR MainWindow
+    #
+    # Main application window containing the primary user interface.
+    # Keep button labels concise due to space constraints.
+    #
+    class MainWindow(QMainWindow):
+      def setupUi(self):
+          self.tr("File")  # translations for this context
+    \endcode
+
+    \section2 TS file format
+
+    TRANSLATOR comment appear as a \c{<message>} elements with empty source text
+    on the \c{<context>} element:
+
+    \code xml
+    <context>
+        <name>Main</name>
+        <message>
+            <source></source>
+            <comment>LoginDialog Login dialog for user authentication</comment>
+            <translation></translation>
+        </message>
+    </context>
+    \endcode
+
+    \section1 Combining meta strings
+
+    Meta strings can be combined to provide comprehensive translation metadata:
+
+    \section2 Complete C++ example
+    \code cpp
+    //: File dialog - confirm destructive action
+    //: This will permanently delete the selected files
+    //% "Delete Selected Files"
+    //@ FileOperations
+    //~ Severity High
+    //~ RequiresConfirmation "true"
+    qtTrId("file.delete.confirm");
+    \endcode
+
+    \section2 Complete QML example
+    \code qml
+    Text {
+      //: Shows current connection status to server
+      //: Updates automatically every few seconds
+      //% "Connected to server"
+      //@ NetworkStatus
+      //~ UpdateFrequency "5000ms"
+      //~ Color "green"
+      text: qsTrId("status.connected")
+    }
+    \endcode
+
+    \section1 Best practices
+
+    \list
+      \li Use translator comments (//:) generously to provide context
+      \li Always include source text (//%) for ID-based translations
+      \li Group related translations using labels (//@) in large projects
+      \li Place meta strings immediately before the translation function call
+      \li Keep translator comments clear and concise but informative
+      \li Use consistent naming for labels and extra metadata keys
+    \endlist
 */

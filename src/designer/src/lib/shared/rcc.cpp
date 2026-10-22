@@ -1,6 +1,7 @@
 // Copyright (C) 2018 The Qt Company Ltd.
 // Copyright (C) 2018 Intel Corporation.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 /* Note: This is a copy of qtbase/src/tools/rcc/rcc.cpp. */
 
@@ -307,7 +308,7 @@ qint64 RCCFileInfo::writeDataBlob(RCCResourceLibrary &lib, qint64 offset,
                             .arg(m_name).arg(data.size()).arg(compressed.size());
                     lib.m_errorDevice->write(msg.toUtf8());
                 }
-                data = compressed;
+                data = std::move(compressed);
                 lib.m_overallFlags |= Compressed;
                 m_flags |= Compressed;
             } else if (lib.verbose()) {
@@ -811,7 +812,7 @@ bool RCCResourceLibrary::readFiles(bool listMode, QIODevice &errorDevice)
             m_errorDevice->write(msg.toUtf8());
         }
 
-        if (!interpretResourceFile(&fileIn, fname, pwd, listMode))
+        if (!interpretResourceFile(&fileIn, fname, std::move(pwd), listMode))
             return false;
     }
     return true;

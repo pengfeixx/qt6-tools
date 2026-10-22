@@ -1,18 +1,39 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #include "iconloader_p.h"
 
 #include <QtCore/qfile.h>
 #include <QtCore/qoperatingsystemversion.h>
+
+#include <QtGui/qcolor.h>
+#include <QtGui/qguiapplication.h>
 #include <QtGui/qicon.h>
+#include <QtGui/qpalette.h>
 #include <QtGui/qpixmap.h>
+#include <QtGui/qstylehints.h>
 
 QT_BEGIN_NAMESPACE
 
 using namespace Qt::StringLiterals;
 
 namespace qdesigner_internal {
+
+// Check for "Dark Mode", either system-wide or usage of a dark style
+static bool isLight(const QColor &textColor)
+{
+    enum : int { DarkThreshold = 200 }; // Observed 239 on KDE/Dark
+
+    return textColor.red() > DarkThreshold && textColor.green() > DarkThreshold
+        && textColor.blue() > DarkThreshold;
+}
+
+QDESIGNER_SHARED_EXPORT bool isDarkMode()
+{
+    return QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark
+        || isLight(QGuiApplication::palette().color(QPalette::WindowText));
+}
 
 QDESIGNER_SHARED_EXPORT QIcon createIconSet(QIcon::ThemeIcon themeIcon,
                                             QLatin1StringView name)

@@ -59,6 +59,20 @@
     \details {\PROD details}
         \note You're looking at detailed information.
     \enddetails
+
+    \details { \tm \PROD, \b the
+               \e {Documentation generator}
+    }
+        Here be more details.
+    \enddetails
+
+    \details
+        Nothing much to see here.
+    \enddetails
+
+    //! Test invalid syntax (argument must start with '{')
+    \details Details
+    \enddetails
 */
 
 /*!
@@ -99,6 +113,7 @@
     \page qdoctests-qdocfileoutput-exhaustive.html 
     \title Exhaustive testing of QDoc commands
     \brief This page is a dumping ground for QDoc commands under test.
+    \meta keywords {QDoc, commands}
 
     \section1 This is a section1
     \section2 This is a section2
@@ -194,6 +209,8 @@
     Here is another example of \inlineimage 01.png {No. 1} inline image with
     alternative text, which should be added as an attribute to the inline
     image.
+
+    \notranslate {Waffles} is not to be translated.
 
     File quoting:
 

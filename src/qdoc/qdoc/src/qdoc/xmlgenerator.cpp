@@ -4,9 +4,14 @@
 
 #include "xmlgenerator.h"
 
+#include "config.h"
 #include "enumnode.h"
 #include "examplenode.h"
 #include "functionnode.h"
+#include "anchorid.h"
+#include "inclusionfilter.h"
+#include "inclusionpolicy.h"
+#include "node.h"
 #include "qdocdatabase.h"
 #include "typedefnode.h"
 
@@ -67,23 +72,23 @@ bool XmlGenerator::isOneColumnValueTable(const Atom *atom)
 int XmlGenerator::hOffset(const Node *node)
 {
     switch (node->nodeType()) {
-    case Node::Namespace:
-    case Node::Class:
-    case Node::Struct:
-    case Node::Union:
-    case Node::Module:
+    case NodeType::Namespace:
+    case NodeType::Class:
+    case NodeType::Struct:
+    case NodeType::Union:
+    case NodeType::Module:
         return 2;
-    case Node::QmlModule:
-    case Node::QmlValueType:
-    case Node::QmlType:
-    case Node::Page:
-    case Node::Group:
+    case NodeType::QmlModule:
+    case NodeType::QmlValueType:
+    case NodeType::QmlType:
+    case NodeType::Page:
+    case NodeType::Group:
         return 1;
-    case Node::Enum:
-    case Node::TypeAlias:
-    case Node::Typedef:
-    case Node::Function:
-    case Node::Property:
+    case NodeType::Enum:
+    case NodeType::TypeAlias:
+    case NodeType::Typedef:
+    case NodeType::Function:
+    case NodeType::Property:
     default:
         return 3;
     }
@@ -95,7 +100,7 @@ int XmlGenerator::hOffset(const Node *node)
  */
 void XmlGenerator::rewritePropertyBrief(const Atom *atom, const Node *relative)
 {
-    if (relative->nodeType() != Node::Property && relative->nodeType() != Node::Variable)
+    if (relative->nodeType() != NodeType::Property && relative->nodeType() != NodeType::Variable)
         return;
     atom = atom->next();
     if (!atom || atom->type() != Atom::String)
@@ -106,7 +111,7 @@ void XmlGenerator::rewritePropertyBrief(const Atom *atom, const Node *relative)
     const QStringList words{ "the", "a", "an", "whether", "which" };
     if (words.contains(firstWord)) {
         QString str = QLatin1String("This ")
-                + QLatin1String(relative->nodeType() == Node::Property ? "property" : "variable")
+                + QLatin1String(relative->nodeType() == NodeType::Property ? "property" : "variable")
                 + QLatin1String(" holds ") + atom->string().left(1).toLower()
                 + atom->string().mid(1);
         const_cast<Atom *>(atom)->setString(str);
@@ -116,15 +121,15 @@ void XmlGenerator::rewritePropertyBrief(const Atom *atom, const Node *relative)
 /*!
   Returns the type of this atom as an enumeration.
  */
-Node::NodeType XmlGenerator::typeFromString(const Atom *atom)
+NodeType XmlGenerator::typeFromString(const Atom *atom)
 {
     const auto &name = atom->string();
     if (name.startsWith(QLatin1String("qml")))
-        return Node::QmlModule;
+        return NodeType::QmlModule;
     else if (name.startsWith(QLatin1String("groups")))
-        return Node::Group;
+        return NodeType::Group;
     else
-        return Node::Module;
+        return NodeType::Module;
 }
 
 /*!
@@ -164,9 +169,14 @@ std::pair<QString, int> XmlGenerator::getAtomListValue(const Atom *atom)
         lookAhead = lookAhead->next();
         Q_ASSERT(lookAhead && lookAhead->type() == Atom::String);
         t += QLatin1String(" (since ");
-        if (lookAhead->string().at(0).isDigit())
-            t += QLatin1String("Qt ");
-        t += lookAhead->string() + QLatin1String(")");
+        const QString sinceString = lookAhead->string();
+        if (sinceString.at(0).isDigit()) {
+            const QString productName = Config::instance().get(CONFIG_PRODUCTNAME).asString();
+            t += productName.isEmpty() ? sinceString : productName + " " + sinceString;
+        } else {
+            t += sinceString;
+        }
+        t += QLatin1String(")");
         skipAhead = 4;
     } else {
         skipAhead = 1;
@@ -198,9 +208,9 @@ std::pair<QString, QString> XmlGenerator::getTableWidthAttr(const Atom *atom)
     }
     if (!p1.isEmpty()) {
         if (p1 == QLatin1String("borderless"))
-            attr = p1;
+            attr = std::move(p1);
         else if (p1.contains(QLatin1Char('%')))
-            width = p1;
+            width = std::move(p1);
     }
 
     // Many times, in the documentation, there is a space before the % sign:
@@ -249,68 +259,17 @@ QString XmlGenerator::registerRef(const QString &ref, bool xmlCompliant)
   Generates a clean and unique reference for the given \a node.
   This reference may depend on the type of the node (typedef,
   QML signal, etc.)
+
+  Delegates base anchor computation to the shared computeAnchorId()
+  utility, then runs the result through registerRef() for
+  per-document collision handling.
  */
 QString XmlGenerator::refForNode(const Node *node)
 {
-    QString ref;
-    switch (node->nodeType()) {
-    case Node::Enum:
-        ref = node->name() + "-enum";
-        break;
-    case Node::Typedef: {
-        const auto *tdf = static_cast<const TypedefNode *>(node);
-        if (tdf->associatedEnum())
-            return refForNode(tdf->associatedEnum());
-    } Q_FALLTHROUGH();
-    case Node::TypeAlias:
-        ref = node->name() + "-typedef";
-        break;
-    case Node::Function: {
-        const auto fn = static_cast<const FunctionNode *>(node);
-        switch (fn->metaness()) {
-        case FunctionNode::QmlSignal:
-            ref = fn->name() + "-signal";
-            break;
-        case FunctionNode::QmlSignalHandler:
-            ref = fn->name() + "-signal-handler";
-            break;
-        case FunctionNode::QmlMethod:
-            ref = fn->name() + "-method";
-            if (fn->overloadNumber() != 0)
-                ref += QLatin1Char('-') + QString::number(fn->overloadNumber());
-            break;
-        default:
-            if (const auto *p = fn->primaryAssociatedProperty(); p && fn->doc().isEmpty()) {
-                return refForNode(p);
-            } else {
-                ref = fn->name();
-                if (fn->overloadNumber() != 0)
-                    ref += QLatin1Char('-') + QString::number(fn->overloadNumber());
-            }
-            break;
-        }
-    } break;
-    case Node::SharedComment: {
-        if (!node->isPropertyGroup())
-            break;
-    } Q_FALLTHROUGH();
-    case Node::QmlProperty:
-        if (node->isAttached())
-            ref = node->name() + "-attached-prop";
-        else
-            ref = node->name() + "-prop";
-        break;
-    case Node::Property:
-        ref = node->name() + "-prop";
-        break;
-    case Node::Variable:
-        ref = node->name() + "-var";
-        break;
-    default:
-        break;
-    }
+    QString ref = computeAnchorId(node);
     return registerRef(ref);
 }
+
 
 /*!
   Construct the link string for the \a node and return it.
@@ -328,7 +287,9 @@ QString XmlGenerator::linkForNode(const Node *node, const Node *relative)
         return node->url();
     if (fileBase(node).isEmpty())
         return QString();
-    if (node->isPrivate())
+    const InclusionPolicy policy = Config::instance().createInclusionPolicy();
+    const NodeContext context = node->createContext();
+    if (!InclusionFilter::isIncluded(policy, context))
         return QString();
 
     QString fn = fileName(node);
@@ -357,12 +318,16 @@ QString XmlGenerator::linkForNode(const Node *node, const Node *relative)
     }
 
     /*
-      If the output is going to subdirectories, the
-      two nodes have different output directories if 'node'
-      was read from index.
+      If the output is going to subdirectories, the two nodes have
+      different output directories if `node` was read from index or
+      is located in a different tree than `relative`. These two
+      conditions may differ only when running in single-exec mode
+      where QDoc does not load index files (or mark nodes as being
+      index nodes).
      */
     if (relative && (node != relative)) {
-        if (useOutputSubdirs() && !node->isExternalPage() && node->isIndexNode())
+        if (useOutputSubdirs() && !node->isExternalPage() &&
+                (node->isIndexNode() || node->tree() != relative->tree()))
             link.prepend("../%1/"_L1.arg(node->tree()->physicalModuleName()));
     }
     return link;
@@ -405,14 +370,16 @@ QString XmlGenerator::getLink(const Atom *atom, const Node *relative, const Node
   are not marked with the qdoc link command that qdoc has
   reason to believe should be links.
 
-  It returns the string for a link found by using the data
-  in the \a atom to search the database. It also sets \a node
-  to point to the target node for that link. \a relative points
-  to the node holding the qdoc comment where the link command
-  was found.
+  Returns the string for a link found by using the data in the \a atom to
+  search the database. \a relative points to the node holding the qdoc comment
+  where the link command was found. Sets \a node to point to the target node
+  for that link if a target was found. \a genus specifies the kind of target to
+  look for.
+
+  If no target was found, returns an empty string which may also be null.
  */
 QString XmlGenerator::getAutoLink(const Atom *atom, const Node *relative, const Node **node,
-                                  Node::Genus genus)
+                                  Genus genus)
 {
     QString ref;
 
@@ -455,28 +422,28 @@ QString XmlGenerator::targetType(const Node *node)
         return QStringLiteral("external");
 
     switch (node->nodeType()) {
-    case Node::Namespace:
+    case NodeType::Namespace:
         return QStringLiteral("namespace");
-    case Node::Class:
-    case Node::Struct:
-    case Node::Union:
+    case NodeType::Class:
+    case NodeType::Struct:
+    case NodeType::Union:
         return QStringLiteral("class");
-    case Node::Page:
-    case Node::Example:
+    case NodeType::Page:
+    case NodeType::Example:
         return QStringLiteral("page");
-    case Node::Enum:
+    case NodeType::Enum:
         return QStringLiteral("enum");
-    case Node::TypeAlias:
+    case NodeType::TypeAlias:
         return QStringLiteral("alias");
-    case Node::Typedef:
+    case NodeType::Typedef:
         return QStringLiteral("typedef");
-    case Node::Property:
+    case NodeType::Property:
         return QStringLiteral("property");
-    case Node::Function:
+    case NodeType::Function:
         return QStringLiteral("function");
-    case Node::Variable:
+    case NodeType::Variable:
         return QStringLiteral("variable");
-    case Node::Module:
+    case NodeType::Module:
         return QStringLiteral("module");
     default:
         break;

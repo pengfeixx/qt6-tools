@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 //
 //  W A R N I N G
@@ -131,7 +132,7 @@ public:
     ConnectionEdit(QWidget *parent, QDesignerFormWindowInterface *form);
     ~ConnectionEdit() override;
 
-    inline const QPointer<QWidget> &background() const { return m_bg_widget; }
+    const QPointer<QWidget> &background() const { return m_bg_widget; }
 
     void setSelected(Connection *con, bool sel);
     bool selected(const Connection *con) const;

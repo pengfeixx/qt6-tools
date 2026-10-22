@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #ifndef ITEMLISTEDITOR_H
 #define ITEMLISTEDITOR_H
@@ -30,8 +31,8 @@ class BoolBlocker
 public:
     Q_DISABLE_COPY_MOVE(BoolBlocker);
 
-    inline explicit BoolBlocker(bool &b) noexcept : block(b), reset(b) { block = true; }
-    inline ~BoolBlocker() noexcept { block = reset; }
+    explicit BoolBlocker(bool &b) noexcept : block(b), reset(b) { block = true; }
+    ~BoolBlocker() noexcept { block = reset; }
 private:
     bool &block;
     bool reset;
@@ -43,7 +44,7 @@ class AbstractItemEditor: public QWidget
 
 public:
     explicit AbstractItemEditor(QDesignerFormWindowInterface *form, QWidget *parent);
-    ~AbstractItemEditor();
+    ~AbstractItemEditor() override;
 
     DesignerIconCache *iconCache() const { return m_iconCache; }
 

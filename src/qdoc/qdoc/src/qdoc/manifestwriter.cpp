@@ -5,6 +5,8 @@
 #include "config.h"
 #include "examplenode.h"
 #include "generator.h"
+#include "location.h"
+#include "outputdirectory.h"
 #include "qdocdatabase.h"
 
 #include <QtCore/qmap.h>
@@ -12,6 +14,8 @@
 #include <QtCore/qxmlstream.h>
 
 QT_BEGIN_NAMESPACE
+
+using namespace Qt::StringLiterals;
 
 /*!
     \internal
@@ -23,10 +27,18 @@ QT_BEGIN_NAMESPACE
 void warnAboutUnusedAttributes(const QStringList &usedAttributes, const ExampleNode *example)
 {
     QMap<QString, QString> attributesToWarnFor;
-    attributesToWarnFor.insert(QStringLiteral("imageUrl"),
-            QStringLiteral("Example documentation should have at least one '\\image'"));
-    attributesToWarnFor.insert(QStringLiteral("projectPath"),
-            QStringLiteral("Example has no project file"));
+    bool missingImageWarning = Config::instance().get(CONFIG_EXAMPLES + Config::dot + CONFIG_WARNABOUTMISSINGIMAGES).asBool();
+    bool missingProjectFileWarning = Config::instance().get(CONFIG_EXAMPLES + Config::dot + CONFIG_WARNABOUTMISSINGPROJECTFILES).asBool();
+
+    if (missingImageWarning)
+        attributesToWarnFor.insert(QStringLiteral("imageUrl"),
+                QStringLiteral("Example documentation should have at least one '\\image'"));
+    if (missingProjectFileWarning)
+        attributesToWarnFor.insert(QStringLiteral("projectPath"),
+                QStringLiteral("Example has no project file"));
+
+    if (attributesToWarnFor.empty())
+        return;
 
     for (auto it = attributesToWarnFor.cbegin(); it != attributesToWarnFor.cend(); ++it) {
         if (!usedAttributes.contains(it.key()))
@@ -264,10 +276,15 @@ void ManifestWriter::generateExampleManifestFile()
     if (exampleNodeMap.isEmpty())
         return;
 
+    const OutputDirectory outputDir =
+            OutputDirectory::ensure(m_outputDirectory, Location());
+
     const QString outputFileName = "examples-manifest.xml";
-    QFile outputFile(m_outputDirectory + QLatin1Char('/') + outputFileName);
-    if (!outputFile.open(QFile::WriteOnly | QFile::Text))
+    QFile outputFile(outputDir.absoluteFilePath(outputFileName));
+    if (!outputFile.open(QFile::WriteOnly | QFile::Text)) {
+        Location().error(u"Cannot open '%1' for writing"_s.arg(outputFile.fileName()));
         return;
+    }
 
     QXmlStreamWriter writer(&outputFile);
     writer.setAutoFormatting(true);

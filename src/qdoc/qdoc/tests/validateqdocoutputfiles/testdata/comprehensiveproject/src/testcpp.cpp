@@ -240,6 +240,7 @@ int Test::someFunction(int, int v)
 
 /*!
     \fn int Test::someFunction(int, int v = 0)
+    \preliminary
 
     Function that takes a parameter \a v.
     Also returns the value of \a v.
@@ -265,6 +266,38 @@ void Test::virtualFun()
 /*!
     \typedef TestQDoc::Test::SomeType
     \brief A typedef.
+*/
+
+/*!
+    \enum TestQDoc::Test::Admonitions
+
+    Enum to exercise admonition commands within \\value descriptions.
+
+    \value NoteInValue A value with a note.
+
+           \note This note should remain inside the value description.
+
+    \value WarningInValue A value with a warning.
+
+           \warning This warning should remain inside the value description.
+
+    \value ImportantInValue A value with an important notice.
+
+           \important This important notice should remain inside the value
+           description.
+
+    \value MultipleAdmonitions A value with multiple admonitions.
+
+           \note First admonition in this value.
+
+           \warning Second admonition in the same value.
+
+    \value MultipleNotes A value with multiple notes, as in the
+           WindowStaysOnBottomHint documentation for Qt::WindowType.
+
+           \note First note for this value.
+
+           \note Second note for this value.
 */
 
 /*!
@@ -308,6 +341,16 @@ void TestDerived::staticObsoleteMember()
 {
     return;
 }
+
+/*!
+    //! Documents enumerators from all unnamed enums
+    \enum TestQDoc::TestDerived::anonymous
+
+    \value Val1
+    \value Val2
+    \value Val3
+    \value Val4
+*/
 
 /*!
 \if defined(test_properties)

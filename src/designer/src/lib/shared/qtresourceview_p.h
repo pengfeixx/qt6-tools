@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 //
 //  W A R N I N G
@@ -19,6 +20,8 @@
 #include <QtWidgets/qwidget.h>
 #include <QtWidgets/qdialog.h>
 
+#include <memory>
+
 QT_BEGIN_NAMESPACE
 
 class QtResourceModel;
@@ -31,7 +34,7 @@ class QDESIGNER_SHARED_EXPORT QtResourceView : public QWidget
     Q_OBJECT
 public:
     explicit QtResourceView(QDesignerFormEditorInterface *core, QWidget *parent = nullptr);
-    ~QtResourceView();
+    ~QtResourceView() override;
 
     void setDragEnabled(bool dragEnabled);
     bool dragEnabled() const;
@@ -63,7 +66,7 @@ protected:
     bool event(QEvent *event) override;
 
 private:
-    QScopedPointer<class QtResourceViewPrivate> d_ptr;
+    std::unique_ptr<class QtResourceViewPrivate> d_ptr;
     Q_DECLARE_PRIVATE(QtResourceView)
     Q_DISABLE_COPY_MOVE(QtResourceView)
 };
@@ -82,7 +85,7 @@ public:
     void setResourceEditingEnabled(bool enable);
 
 private:
-    QScopedPointer<class QtResourceViewDialogPrivate> d_ptr;
+    std::unique_ptr<class QtResourceViewDialogPrivate> d_ptr;
     Q_DECLARE_PRIVATE(QtResourceViewDialog)
     Q_DISABLE_COPY_MOVE(QtResourceViewDialog)
 };

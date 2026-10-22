@@ -43,12 +43,8 @@
 #define GUMBO_GUMBO_H_
 
 #ifdef _MSC_VER
-#ifndef _CRT_SECURE_NO_WARNINGS
 #define _CRT_SECURE_NO_WARNINGS
-#endif
-#ifndef fileno
 #define fileno _fileno
-#endif
 #endif
 
 #include <stdbool.h>
@@ -393,7 +389,10 @@ typedef enum {
    */
   GUMBO_INSERTION_CONVERTED_FROM_END_TAG = 1 << 4,
 
-  /** A flag for nodes that are converted from the parse of an <isindex> tag. */
+  /**
+   * Deprecated! Do not use!
+   * It's not used anymore since special handling for <isindex> is obsolete.
+   */
   GUMBO_INSERTION_FROM_ISINDEX = 1 << 5,
 
   /** A flag for <image> tags that are rewritten as <img>. */

@@ -4,6 +4,7 @@
 #include "cppcodeparser.h"
 
 #include "access.h"
+#include "qmlenumnode.h"
 #include "classnode.h"
 #include "clangcodeparser.h"
 #include "collectionnode.h"
@@ -13,12 +14,17 @@
 #include "externalpagenode.h"
 #include "functionnode.h"
 #include "generator.h"
+#include "genustypes.h"
 #include "headernode.h"
+#include "inclusionfilter.h"
+#include "inclusionpolicy.h"
 #include "namespacenode.h"
 #include "qdocdatabase.h"
 #include "qmltypenode.h"
+#include "qmlpropertyarguments.h"
 #include "qmlpropertynode.h"
 #include "sharedcommentnode.h"
+#include "utilities.h"
 
 #include <QtCore/qdebug.h>
 #include <QtCore/qmap.h>
@@ -33,12 +39,12 @@ QT_BEGIN_NAMESPACE
   All these can appear in a C++ namespace. Don't add
   anything that can't be in a C++ namespace.
  */
-static const QMap<QString, Node::NodeType> s_nodeTypeMap{
-    { COMMAND_NAMESPACE, Node::Namespace }, { COMMAND_NAMESPACE, Node::Namespace },
-    { COMMAND_CLASS, Node::Class },         { COMMAND_STRUCT, Node::Struct },
-    { COMMAND_UNION, Node::Union },         { COMMAND_ENUM, Node::Enum },
-    { COMMAND_TYPEALIAS, Node::TypeAlias }, { COMMAND_TYPEDEF, Node::Typedef },
-    { COMMAND_PROPERTY, Node::Property },   { COMMAND_VARIABLE, Node::Variable }
+static const QMap<QString, NodeType> s_nodeTypeMap{
+    { COMMAND_NAMESPACE, NodeType::Namespace }, { COMMAND_NAMESPACE, NodeType::Namespace },
+    { COMMAND_CLASS, NodeType::Class },         { COMMAND_STRUCT, NodeType::Struct },
+    { COMMAND_UNION, NodeType::Union },         { COMMAND_ENUM, NodeType::Enum },
+    { COMMAND_TYPEALIAS, NodeType::TypeAlias }, { COMMAND_TYPEDEF, NodeType::Typedef },
+    { COMMAND_PROPERTY, NodeType::Property },   { COMMAND_VARIABLE, NodeType::Variable }
 };
 
 typedef bool (Node::*NodeTypeTestFunc)() const;
@@ -51,7 +57,7 @@ static const QMap<QString, NodeTypeTestFunc> s_nodeTypeTestFuncMap{
 };
 
 CppCodeParser::CppCodeParser(FnCommandParser&& parser)
-    : fn_parser{parser}
+    : fn_parser{std::move(parser)}
 {
     Config &config = Config::instance();
     QStringList exampleFilePatterns{config.get(CONFIG_EXAMPLES
@@ -76,6 +82,33 @@ CppCodeParser::CppCodeParser(FnCommandParser&& parser)
 }
 
 /*!
+  Takes the singleton or uncreatable attribute of \a qmlType from its native type
+  \a classNode. Attributes given explicitly in the QML documentation win, so a type
+  documented as \\qmlsingletontype or \\qmluncreatabletype is left alone.
+ */
+static void setQmlAttributesFromNativeType(QmlTypeNode *qmlType, const ClassNode *classNode)
+{
+    if (qmlType->isSingleton() || qmlType->isUncreatable())
+        return;
+
+    if (classNode->isQmlSingleton())
+        qmlType->setSingleton();
+    else if (classNode->isQmlUncreatable())
+        qmlType->setUncreatable();
+}
+
+/*!
+  Returns \c true if \a doc names the native type of a QML type explicitly, using
+  either \\nativetype or the deprecated \\instantiates.
+ */
+static bool hasNativeTypeCommand(const Doc &doc)
+{
+    const QSet<QString> metaCommands = doc.metaCommandsUsed();
+    return metaCommands.contains(COMMAND_QMLNATIVETYPE)
+            || metaCommands.contains(COMMAND_QMLINSTANTIATES);
+}
+
+/*!
   Process the topic \a command found in the \a doc with argument \a arg.
  */
 Node *CppCodeParser::processTopicCommand(const Doc &doc, const QString &command,
@@ -94,13 +127,13 @@ Node *CppCodeParser::processTopicCommand(const Doc &doc, const QString &command,
           this way to allow the writer to refer to the entity
           without including the namespace qualifier.
          */
-        Node::NodeType type = s_nodeTypeMap[command];
+        NodeType type = s_nodeTypeMap[command];
         QStringList words = arg.first.split(QLatin1Char(' '));
         QStringList path;
         qsizetype idx = 0;
         Node *node = nullptr;
 
-        if (type == Node::Variable && words.size() > 1)
+        if (type == NodeType::Variable && words.size() > 1)
             idx = words.size() - 1;
         path = words[idx].split("::");
 
@@ -109,10 +142,10 @@ Node *CppCodeParser::processTopicCommand(const Doc &doc, const QString &command,
         if (node == nullptr && command == COMMAND_CLASS) {
             node = database->findNodeByNameAndType(path, &Node::isTypeAlias);
             if (node) {
-                auto access = node->access();
-                auto loc = node->location();
-                auto templateDecl = node->templateDecl();
-                node = new ClassNode(Node::Class, node->parent(), node->name());
+                const auto &access = node->access();
+                const auto &loc = node->location();
+                const auto &templateDecl = node->templateDecl();
+                node = new ClassNode(NodeType::Class, node->parent(), node->name());
                 node->setAccess(access);
                 node->setLocation(loc);
                 node->setTemplateDecl(templateDecl);
@@ -125,7 +158,7 @@ Node *CppCodeParser::processTopicCommand(const Doc &doc, const QString &command,
                                 .arg(arg.first, command));
             }
         } else if (node->isAggregate()) {
-            if (type == Node::Namespace) {
+            if (type == NodeType::Namespace) {
                 auto *ns = static_cast<NamespaceNode *>(node);
                 ns->markSeen();
                 ns->setWhereDocumented(ns->tree()->camelCaseModuleName());
@@ -157,6 +190,15 @@ Node *CppCodeParser::processTopicCommand(const Doc &doc, const QString &command,
         cn->setLocation(doc.startLocation());
         cn->markSeen();
         return cn;
+    } else if (command == COMMAND_CONCEPT) {
+        CollectionNode *cn = database->addConcept(arg.first);
+        // Default the page title to the concept's name. A documented
+        // concept rarely carries a separate \title, yet its reference
+        // page still needs a heading; an authored \title overrides this.
+        cn->setTitle(arg.first);
+        cn->setLocation(doc.startLocation());
+        cn->markSeen();
+        return cn;
     } else if (command == COMMAND_QMLMODULE) {
         QStringList blankSplit = arg.first.split(QLatin1Char(' '));
         CollectionNode *cn = database->addQmlModule(blankSplit[0]);
@@ -168,76 +210,74 @@ Node *CppCodeParser::processTopicCommand(const Doc &doc, const QString &command,
         auto *pn = new PageNode(database->primaryTreeRoot(), arg.first.split(' ').front());
         pn->setLocation(doc.startLocation());
         return pn;
-    } else if (command == COMMAND_QMLTYPE ||
-               command == COMMAND_QMLVALUETYPE ||
-               command == COMMAND_QMLBASICTYPE) {
-        auto nodeType = (command == COMMAND_QMLTYPE) ? Node::QmlType : Node::QmlValueType;
+    } else if (command == COMMAND_QMLTYPE || command == COMMAND_QMLSINGLETONTYPE
+               || command == COMMAND_QMLUNCREATABLETYPE || command == COMMAND_QMLVALUETYPE
+               || command == COMMAND_QMLBASICTYPE) {
+        auto nodeType = (command == COMMAND_QMLVALUETYPE || command == COMMAND_QMLBASICTYPE)
+                ? NodeType::QmlValueType
+                : NodeType::QmlType;
         QString qmid;
         if (auto args = doc.metaCommandArgs(COMMAND_INQMLMODULE); !args.isEmpty())
             qmid = args.first().first;
         auto *qcn = database->findQmlTypeInPrimaryTree(qmid, arg.first);
         // A \qmlproperty may have already constructed a placeholder type
         // without providing a module identifier; allow such cases
-        if (!qcn && !qmid.isEmpty())
+        if (!qcn && !qmid.isEmpty()) {
             qcn = database->findQmlTypeInPrimaryTree(QString(), arg.first);
+            if (qcn && !qcn->logicalModuleName().isEmpty())
+                qcn = nullptr;
+        }
         if (!qcn || qcn->nodeType() != nodeType)
             qcn = new QmlTypeNode(database->primaryTreeRoot(), arg.first, nodeType);
         if (!qmid.isEmpty())
             database->addToQmlModule(qmid, qcn);
         qcn->setLocation(doc.startLocation());
+        if (command == COMMAND_QMLSINGLETONTYPE)
+            qcn->setSingleton();
+        else if (command == COMMAND_QMLUNCREATABLETYPE)
+            qcn->setUncreatable();
+        else if (command == COMMAND_QMLTYPE && !hasNativeTypeCommand(doc)) {
+            // If the native type is named explicitly, the attributes are taken from it in
+            // processQmlNativeTypeCommand(). Without such a command, guess the native type
+            // by matching the QML type name against a class of the same name. QML type
+            // names live in a different namespace than C++ class names, so the guess may
+            // well hit an unrelated class.
+            // TODO: Replace name-based matching with QML_ELEMENT/QML_NAMED_ELEMENT macro
+            // detection and automatically setting the native type relationship.
+            if (auto classNode = database->findClassNode(arg.first.split(u"::"_s)))
+                setQmlAttributesFromNativeType(qcn, classNode);
+        }
         return qcn;
+    } else if (command == COMMAND_QMLENUM) {
+        return processQmlEnumTopic(doc.enumItemNames(), doc.location(), arg.first);
     } else if ((command == COMMAND_QMLSIGNAL) || (command == COMMAND_QMLMETHOD)
-               || (command == COMMAND_QMLATTACHEDSIGNAL) || (command == COMMAND_QMLATTACHEDMETHOD)) {
+               || (command == COMMAND_QMLATTACHEDSIGNAL)
+               || (command == COMMAND_QMLATTACHEDMETHOD)) {
         Q_UNREACHABLE();
     }
     return nullptr;
 }
 
 /*!
-  A QML property argument has the form...
+    Finds a QmlTypeNode \a name, under the specific \a moduleName, from the primary tree.
+    If one is not found, creates one.
 
-  <type> <QML-type>::<name>
-  <type> <QML-module>::<QML-type>::<name>
-
-  This function splits the argument into one of those
-  two forms. The three part form is the old form, which
-  was used before the creation of Qt Quick 2 and Qt
-  Components. A <QML-module> is the QML equivalent of a
-  C++ namespace. So this function splits \a arg on "::"
-  and stores the parts in \a type, \a module, \a qmlTypeName,
-  and \a name, and returns \c true. If any part other than
-  \a module is not found, a qdoc warning is emitted and
-  false is returned.
-
-  \note The two QML types \e{Component} and \e{QtObject}
-  never have a module qualifier.
- */
-bool CppCodeParser::splitQmlPropertyArg(const QString &arg, QString &type, QString &module,
-                                        QString &qmlTypeName, QString &name,
-                                        const Location &location)
+    Returns the found or created node.
+*/
+QmlTypeNode *findOrCreateQmlType(const QString &moduleName, const QString &name, const Location &location)
 {
-    QStringList blankSplit = arg.split(QLatin1Char(' '));
-    if (blankSplit.size() > 1) {
-        type = blankSplit[0];
-        QStringList colonSplit(blankSplit[1].split("::"));
-        if (colonSplit.size() == 3) {
-            module = colonSplit[0];
-            qmlTypeName = colonSplit[1];
-            name = colonSplit[2];
-            return true;
-        }
-        if (colonSplit.size() == 2) {
-            module.clear();
-            qmlTypeName = colonSplit[0];
-            name = colonSplit[1];
-            return true;
-        }
-        location.warning(
-                QStringLiteral("Unrecognizable QML module/component qualifier for %1").arg(arg));
-    } else {
-        location.warning(QStringLiteral("Missing property type for %1").arg(arg));
+    QDocDatabase* database = QDocDatabase::qdocDB();
+    auto *aggregate = database->findQmlTypeInPrimaryTree(moduleName, name);
+    // Note: Constructing a QmlType node by default, as opposed to QmlValueType.
+    // This may lead to unexpected behavior if documenting \qmlvaluetype's members
+    // before the type itself.
+    if (!aggregate) {
+        aggregate = new QmlTypeNode(database->primaryTreeRoot(), name, NodeType::QmlType);
+        aggregate->setLocation(location);
+        if (!moduleName.isEmpty())
+            database->addToQmlModule(moduleName, aggregate);
     }
-    return false;
+    return aggregate;
 }
 
 std::vector<TiedDocumentation> CppCodeParser::processQmlProperties(const UntiedDocumentation &untied)
@@ -247,64 +287,47 @@ std::vector<TiedDocumentation> CppCodeParser::processQmlProperties(const UntiedD
     if (topics.isEmpty())
         return {};
 
-    QString arg;
-    QString type;
-    QString group;
-    QString qmlModule;
-    QString property;
-    QString qmlTypeName;
-
     std::vector<TiedDocumentation> tied{};
 
-    Topic topic = topics.at(0);
-    arg = topic.m_args;
-    if (splitQmlPropertyArg(arg, type, qmlModule, qmlTypeName, property, doc.location())) {
-        qsizetype i = property.indexOf('.');
-        if (i != -1)
-            group = property.left(i);
-    }
-
-    QDocDatabase *database = QDocDatabase::qdocDB();
+    auto firstTopicArgs =
+            QmlPropertyArguments::parse(topics.at(0).m_args, doc.location(),
+                    QmlPropertyArguments::ParsingOptions::RequireQualifiedPath);
+    if (!firstTopicArgs)
+        return {};
 
     NodeList sharedNodes;
-    QmlTypeNode *qmlType = database->findQmlTypeInPrimaryTree(qmlModule, qmlTypeName);
-    // Note: Constructing a QmlType node by default, as opposed to QmlValueType.
-    // This may lead to unexpected behavior if documenting \qmlvaluetype's properties
-    // before the type itself.
-    if (qmlType == nullptr) {
-        qmlType = new QmlTypeNode(database->primaryTreeRoot(), qmlTypeName, Node::QmlType);
-        qmlType->setLocation(doc.startLocation());
-        if (!qmlModule.isEmpty())
-            database->addToQmlModule(qmlModule, qmlType);
-    }
+    auto *qmlType = findOrCreateQmlType((*firstTopicArgs).m_module, (*firstTopicArgs).m_qmltype, doc.startLocation());
 
     for (const auto &topicCommand : topics) {
         QString cmd = topicCommand.m_topic;
-        arg = topicCommand.m_args;
         if ((cmd == COMMAND_QMLPROPERTY) || (cmd == COMMAND_QMLATTACHEDPROPERTY)) {
             bool attached = cmd.contains(QLatin1String("attached"));
-            if (splitQmlPropertyArg(arg, type, qmlModule, qmlTypeName, property, doc.location())) {
-                if (qmlType != database->findQmlTypeInPrimaryTree(qmlModule, qmlTypeName)) {
+            if (auto qpa = QmlPropertyArguments::parse(topicCommand.m_args, doc.location(),
+                    QmlPropertyArguments::ParsingOptions::RequireQualifiedPath)) {
+                if (qmlType != QDocDatabase::qdocDB()->findQmlTypeInPrimaryTree(qpa->m_module, qpa->m_qmltype)) {
                     doc.startLocation().warning(
                             QStringLiteral(
                                     "All properties in a group must belong to the same type: '%1'")
-                                    .arg(arg));
+                                    .arg(topicCommand.m_args));
                     continue;
                 }
-                QmlPropertyNode *existingProperty = qmlType->hasQmlProperty(property, attached);
+                Aggregate::PropertySearchType searchType = attached ? Aggregate::AttachedProperties
+                                                                    : Aggregate::UnattachedProperties;
+                QmlPropertyNode *existingProperty = qmlType->hasQmlProperty(qpa->m_name, searchType);
                 if (existingProperty) {
                     processMetaCommands(doc, existingProperty);
                     if (!doc.body().isEmpty()) {
                         doc.startLocation().warning(
                                 QStringLiteral("QML property documented multiple times: '%1'")
-                                        .arg(arg), QStringLiteral("also seen here: %1")
+                                        .arg(topicCommand.m_args), QStringLiteral("also seen here: %1")
                                                 .arg(existingProperty->location().toString()));
                     }
                     continue;
                 }
-                auto *qpn = new QmlPropertyNode(qmlType, property, type, attached);
+                auto *qpn = new QmlPropertyNode(qmlType, qpa->m_name, qpa->m_type, attached);
+                qpn->setIsList(qpa->m_isList);
                 qpn->setLocation(doc.startLocation());
-                qpn->setGenus(Node::QML);
+                qpn->setGenus(Genus::QML);
 
                 tied.emplace_back(TiedDocumentation{doc, qpn});
 
@@ -322,6 +345,11 @@ std::vector<TiedDocumentation> CppCodeParser::processQmlProperties(const UntiedD
     // the topic nodes - which need to be written to index before the related
     // scn.
     if (sharedNodes.size() > 1) {
+        // Resolve QML property group identifier (if any) from the first topic
+        // command arguments.
+        QString group;
+        if (auto dot = (*firstTopicArgs).m_name.indexOf('.'_L1); dot != -1)
+            group = (*firstTopicArgs).m_name.left(dot);
         auto *scn = new SharedCommentNode(qmlType, sharedNodes.size(), group);
         scn->setLocation(doc.startLocation());
 
@@ -380,12 +408,7 @@ void CppCodeParser::processMetaCommand(const Doc &doc, const QString &command,
           flags and overload numbers will be resolved later
           in Aggregate::normalizeOverloads().
          */
-        if (node->isFunction())
-            static_cast<FunctionNode *>(node)->setOverloadFlag();
-        else if (node->isSharedCommentNode())
-            static_cast<SharedCommentNode *>(node)->setOverloadFlags();
-        else
-            doc.location().warning(QStringLiteral("Ignored '\\%1'").arg(COMMAND_OVERLOAD));
+        processOverloadCommand(node, doc);
     } else if (command == COMMAND_REIMP) {
         if (node->parent() && !node->parent()->isInternal()) {
             if (node->isFunction()) {
@@ -416,11 +439,6 @@ void CppCodeParser::processMetaCommand(const Doc &doc, const QString &command,
         if (node->isAggregate()) {
             doc.location().warning("Invalid '\\%1' not allowed in '\\%2'"_L1
                     .arg(COMMAND_RELATES, node->nodeTypeString()));
-        } else if (!node->isRelatedNonmember() && node->parent()->isClassNode()) {
-            if (!doc.isInternal()) {
-                doc.location().warning("Invalid '\\%1' ('%2' must be global)"_L1
-                        .arg(COMMAND_RELATES, node->name()));
-            }
         }
     } else if (command == COMMAND_NEXTPAGE) {
         CodeParser::setLink(node, Node::NextLink, arg);
@@ -438,7 +456,7 @@ void CppCodeParser::processMetaCommand(const Doc &doc, const QString &command,
     } else if (command == COMMAND_QMLNATIVETYPE || command == COMMAND_QMLINSTANTIATES) {
         if (command == COMMAND_QMLINSTANTIATES)
             doc.location().report(
-                    u"\\nativetype is deprecated and will be removed in a future version. Use \\nativetype instead."_s);
+                    u"\\instantiates is deprecated and will be removed in a future version. Use \\nativetype instead."_s);
         // TODO: COMMAND_QMLINSTANTIATES is deprecated since 6.8. Its remains should be removed no later than Qt 7.0.0.
         processQmlNativeTypeCommand(node, command, arg, doc.location());
     } else if (command == COMMAND_DEFAULT) {
@@ -454,10 +472,15 @@ void CppCodeParser::processMetaCommand(const Doc &doc, const QString &command,
     } else if (command == COMMAND_QMLDEFAULT) {
         node->markDefault();
     } else if (command == COMMAND_QMLENUMERATORSFROM) {
-        if (!node->isQmlProperty()) {
-            doc.location().warning("Ignored '\\%1', applies only to '\\%2'"_L1
-                    .arg(command, COMMAND_QMLPROPERTY));
-        } else if (!static_cast<QmlPropertyNode*>(node)->setEnumNode(argPair.first, argPair.second)) {
+        NativeEnum *nativeEnum{nullptr};
+        if (auto *ne_if = dynamic_cast<NativeEnumInterface *>(node))
+            nativeEnum = ne_if->nativeEnum();
+        else {
+            doc.location().warning("Ignored '\\%1', applies only to '\\%2' and '\\%3'"_L1
+                    .arg(command, COMMAND_QMLPROPERTY, COMMAND_QMLENUM));
+            return;
+        }
+        if (!nativeEnum->resolve(argPair.first, argPair.second)) {
             doc.location().warning("Failed to find C++ enumeration '%2' passed to \\%1"_L1
                     .arg(command, arg), "Use \\value commands instead"_L1);
         }
@@ -481,16 +504,15 @@ void CppCodeParser::processMetaCommand(const Doc &doc, const QString &command,
     } else if (command == COMMAND_INQMLMODULE) {
         // Handled when parsing topic commands
     } else if (command == COMMAND_OBSOLETE) {
-        node->setStatus(Node::Deprecated);
+        node->setStatus(Status::Deprecated);
     } else if (command == COMMAND_NONREENTRANT) {
         node->setThreadSafeness(Node::NonReentrant);
     } else if (command == COMMAND_PRELIMINARY) {
         // \internal wins.
         if (!node->isInternal())
-            node->setStatus(Node::Preliminary);
+            node->setStatus(Status::Preliminary);
     } else if (command == COMMAND_INTERNAL) {
-        if (!Config::instance().showInternal())
-            node->markInternal();
+        node->markInternal();
     } else if (command == COMMAND_REENTRANT) {
         node->setThreadSafeness(Node::Reentrant);
     } else if (command == COMMAND_SINCE) {
@@ -499,11 +521,6 @@ void CppCodeParser::processMetaCommand(const Doc &doc, const QString &command,
         node->setWrapper();
     } else if (command == COMMAND_THREADSAFE) {
         node->setThreadSafeness(Node::ThreadSafe);
-    } else if (command == COMMAND_TITLE) {
-        if (!node->setTitle(arg))
-            doc.location().warning(QStringLiteral("Ignored '\\%1'").arg(COMMAND_TITLE));
-        else if (node->isExample())
-            database->addExampleNode(static_cast<ExampleNode *>(node));
     } else if (command == COMMAND_SUBTITLE) {
         if (!node->setSubtitle(arg))
             doc.location().warning(QStringLiteral("Ignored '\\%1'").arg(COMMAND_SUBTITLE));
@@ -516,25 +533,46 @@ void CppCodeParser::processMetaCommand(const Doc &doc, const QString &command,
                             .arg(COMMAND_QTVARIABLE));
     } else if (command == COMMAND_QTCMAKEPACKAGE) {
         if (node->isModule())
-            node->setQtCMakeComponent(arg);
+            node->setCMakeComponent(arg);
         else
             doc.location().warning(
                     QStringLiteral("Command '\\%1' is only meaningful in '\\module'.")
                             .arg(COMMAND_QTCMAKEPACKAGE));
     } else if (command == COMMAND_QTCMAKETARGETITEM) {
         if (node->isModule())
-            node->setQtCMakeTargetItem(arg);
+            node->setCMakeTargetItem(QLatin1String("Qt6::") + arg);
         else
             doc.location().warning(
                     QStringLiteral("Command '\\%1' is only meaningful in '\\module'.")
                             .arg(COMMAND_QTCMAKETARGETITEM));
-    } else if (command == COMMAND_MODULESTATE ) {
+    } else if (command == COMMAND_CMAKEPACKAGE) {
+        if (node->isModule())
+            node->setCMakePackage(arg);
+        else
+            doc.location().warning(
+                    QStringLiteral("Command '\\%1' is only meaningful in '\\module'.")
+                            .arg(COMMAND_CMAKEPACKAGE));
+    } else if (command == COMMAND_CMAKECOMPONENT) {
+        if (node->isModule())
+            node->setCMakeComponent(arg);
+        else
+            doc.location().warning(
+                    QStringLiteral("Command '\\%1' is only meaningful in '\\module'.")
+                            .arg(COMMAND_CMAKECOMPONENT));
+    } else if (command == COMMAND_CMAKETARGETITEM) {
+        if (node->isModule())
+            node->setCMakeTargetItem(arg);
+        else
+            doc.location().warning(
+                    QStringLiteral("Command '\\%1' is only meaningful in '\\module'.")
+                            .arg(COMMAND_CMAKETARGETITEM));
+    } else if (command == COMMAND_MODULESTATE) {
         if (!node->isModule() && !node->isQmlModule()) {
             doc.location().warning(
                     QStringLiteral(
                             "Command '\\%1' is only meaningful in '\\module' and '\\qmlmodule'.")
                             .arg(COMMAND_MODULESTATE));
-        } else {
+        } else if (!node->isPreliminary() && !node->isInternal()) {
             static_cast<CollectionNode*>(node)->setState(arg);
         }
     } else if (command == COMMAND_NOAUTOLIST) {
@@ -596,6 +634,44 @@ void CppCodeParser::processComparesCommand(Node *node, const QString &arg, const
 }
 
 /*!
+    Processes the \\overload command for the given \a node and \a doc.
+    Handles both regular overloads and primary overloads (\\overload primary).
+    Issues warnings for multiple primary overloads with location references.
+*/
+void CppCodeParser::processOverloadCommand(Node *node, const Doc &doc)
+{
+    if (node->isFunction()) {
+        auto *fn = static_cast<FunctionNode *>(node);
+
+        // If this function is part of a SharedCommentNode, skip processing here.
+        // The SharedCommentNode will handle \overload primary position-dependently.
+        if (fn->sharedCommentNode())
+            return;
+
+        // Check if this is "\overload primary"
+        const auto &overloadArgs = doc.overloadList();
+        if (!overloadArgs.isEmpty()
+            && overloadArgs.first().first == "__qdoc_primary_overload__"_L1) {
+
+            // Note: We don't check for duplicate primary overloads here because
+            // Doc locations may not be fully initialized yet, especially for
+            // shared comment nodes with multiple \fn commands.
+            // The check is done later in Aggregate::normalizeOverloads().
+
+            fn->setPrimaryOverloadFlag();
+            // Primary overloads are still overloads, so set both flags
+            fn->setOverloadFlag();
+        } else {
+            fn->setOverloadFlag();
+        }
+    } else if (node->isSharedCommentNode()) {
+        static_cast<SharedCommentNode *>(node)->setOverloadFlags();
+    } else {
+        doc.location().warning("Ignored '\\%1'"_L1.arg(COMMAND_OVERLOAD));
+    }
+}
+
+/*!
   The topic command has been processed, and now \a doc and
   \a node are passed to this function to get the metacommands
   from \a doc and process them one at a time. \a node is the
@@ -627,11 +703,52 @@ void CppCodeParser::processMetaCommands(const Doc &doc, Node *node)
     for (const auto &command : metaCommandsUsed) {
         const ArgList args = doc.metaCommandArgs(command);
         for (const auto &arg : args) {
-            std::for_each(nodes_to_process.cbegin(), nodes_to_process.cend(), [this, doc, command, arg](auto node){
+            std::for_each(nodes_to_process.cbegin(), nodes_to_process.cend(), [doc, command, arg](auto node){
                 processMetaCommand(doc, command, arg, node);
             });
         }
     }
+
+    // Apply a title (stripped of formatting) to the Node if set
+    if (!doc.title().isEmpty()) {
+        if (!node->setTitle(doc.title().toString()))
+            doc.location().warning(QStringLiteral("Ignored '\\title'"));
+        if (node->isExample())
+            QDocDatabase::qdocDB()->addExampleNode(static_cast<ExampleNode *>(node));
+    }
+}
+
+/*!
+    Creates an EnumNode instance explicitly for the \qmlenum command.
+    Utilizes QmlPropertyArguments for argument (\a arg) parsing.
+
+    Adds a list of \a enumItemNames as enumerators to facilitate linking
+    via enumerator names.
+*/
+EnumNode *CppCodeParser::processQmlEnumTopic(const QStringList &enumItemNames,
+                                             const Location &location, const QString &arg)
+{
+    if (arg.isEmpty()) {
+        location.warning(u"Missing argument to \\%1 command."_s.arg(COMMAND_QMLENUM));
+        return nullptr;
+    }
+
+    auto parsedArgs = QmlPropertyArguments::parse(arg, location,
+            QmlPropertyArguments::ParsingOptions::RequireQualifiedPath |
+            QmlPropertyArguments::ParsingOptions::IgnoreType);
+
+    if (!parsedArgs)
+        return nullptr;
+
+    auto *qmlType = findOrCreateQmlType((*parsedArgs).m_module, (*parsedArgs).m_qmltype, location);
+
+    auto *enumNode = new QmlEnumNode(qmlType, (*parsedArgs).m_name);
+    enumNode->setLocation(location);
+
+    for (const auto &item : enumItemNames)
+        enumNode->addItem(EnumItem(item, 0));
+
+    return enumNode;
 }
 
 /*!
@@ -640,64 +757,29 @@ void CppCodeParser::processMetaCommands(const Doc &doc, Node *node)
 FunctionNode *CppCodeParser::parseOtherFuncArg(const QString &topic, const Location &location,
                                                const QString &funcArg)
 {
-    QString funcName;
-    QString returnType;
+    auto parsingOpts { QmlPropertyArguments::ParsingOptions::RequireQualifiedPath };
 
-    qsizetype leftParen = funcArg.indexOf(QChar('('));
-    if (leftParen > 0)
-        funcName = funcArg.left(leftParen);
+    // Signatures for QML signals require no return type. Parameter list is optional.
+    if (topic.contains("signal"_L1))
+        parsingOpts = parsingOpts | QmlPropertyArguments::ParsingOptions::IgnoreType;
     else
-        funcName = funcArg;
-    qsizetype firstBlank = funcName.indexOf(QChar(' '));
-    if (firstBlank > 0) {
-        returnType = funcName.left(firstBlank);
-        funcName = funcName.right(funcName.size() - firstBlank - 1);
-    }
+        parsingOpts = parsingOpts | QmlPropertyArguments::ParsingOptions::ParseAsMethod;
 
-    QStringList colonSplit(funcName.split("::"));
-    if (colonSplit.size() < 2) {
-        QString msg = "Unrecognizable QML module/component qualifier for " + funcArg;
-        location.warning(msg.toLatin1().data());
+
+    auto methodArgs = QmlPropertyArguments::parse(funcArg, location, parsingOpts);
+    if (!methodArgs)
         return nullptr;
-    }
-    QString moduleName;
-    QString elementName;
-    if (colonSplit.size() > 2) {
-        moduleName = colonSplit[0];
-        elementName = colonSplit[1];
-    } else {
-        elementName = colonSplit[0];
-    }
-    funcName = colonSplit.last();
 
-    QDocDatabase* database = QDocDatabase::qdocDB();
+    auto *aggregate = findOrCreateQmlType((*methodArgs).m_module,
+                                          (*methodArgs).m_qmltype, location);
 
-    auto *aggregate = database->findQmlTypeInPrimaryTree(moduleName, elementName);
-    // Note: Constructing a QmlType node by default, as opposed to QmlValueType.
-    // This may lead to unexpected behavior if documenting \qmlvaluetype's methods
-    // before the type itself.
-    if (!aggregate) {
-        aggregate = new QmlTypeNode(database->primaryTreeRoot(), elementName, Node::QmlType);
-        aggregate->setLocation(location);
-        if (!moduleName.isEmpty())
-            database->addToQmlModule(moduleName, aggregate);
-    }
-
-    QString params;
-    QStringList leftParenSplit = funcArg.split('(');
-    if (leftParenSplit.size() > 1) {
-        QStringList rightParenSplit = leftParenSplit[1].split(')');
-        if (!rightParenSplit.empty())
-            params = rightParenSplit[0];
-    }
-
-    FunctionNode::Metaness metaness = FunctionNode::getMetanessFromTopic(topic);
-    bool attached = topic.contains(QLatin1String("attached"));
-    auto *fn = new FunctionNode(metaness, aggregate, funcName, attached);
+    Metaness metaness = FunctionNode::getMetanessFromTopic(topic);
+    bool attached = topic.contains("attached"_L1);
+    auto *fn = new FunctionNode(metaness, aggregate, (*methodArgs).m_name, attached);
     fn->setAccess(Access::Public);
     fn->setLocation(location);
-    fn->setReturnType(returnType);
-    fn->setParameters(params);
+    fn->setReturnType((*methodArgs).m_type);
+    fn->setParameters((*methodArgs).m_params);
     return fn;
 }
 
@@ -728,6 +810,7 @@ FunctionNode *CppCodeParser::parseMacroArg(const Location &location, const QStri
     }
     QString params;
     if (leftParenSplit.size() > 1) {
+        params = QString("");
         const QString &afterParen = leftParenSplit.at(1);
         qsizetype rightParen = afterParen.indexOf(')');
         if (rightParen >= 0)
@@ -740,9 +823,9 @@ FunctionNode *CppCodeParser::parseMacroArg(const Location &location, const QStri
         returnType += QChar(' ') + macroName.left(i);
         macroName = macroName.mid(i);
     }
-    FunctionNode::Metaness metaness = FunctionNode::MacroWithParams;
-    if (params.isEmpty())
-        metaness = FunctionNode::MacroWithoutParams;
+    Metaness metaness = Metaness::MacroWithParams;
+    if (params.isNull())
+        metaness = Metaness::MacroWithoutParams;
     auto *macro = new FunctionNode(metaness, database->primaryTreeRoot(), macroName);
     macro->setAccess(Access::Public);
     macro->setLocation(location);
@@ -791,8 +874,7 @@ void CppCodeParser::setExampleFileLists(ExampleNode *en)
                     mainCpp = fileName;
                 return true;
             }
-            return fileName.contains("/qrc_") || fileName.contains("/moc_")
-                    || fileName.contains("/ui_");
+            return Utilities::isGeneratedFile(fileName);
         };
 
         exampleFiles.erase(
@@ -860,12 +942,13 @@ CppCodeParser::processTopicArgs(const UntiedDocumentation &untied)
         Node *node = nullptr;
         if (args.size() == 1) {
             if (topic == COMMAND_FN) {
-                if (Config::instance().showInternal() || !doc.isInternal()) {
-                    auto result = fn_parser(doc.location(), args[0].first, args[0].second, untied.context);
-                    if (auto *error = std::get_if<FnMatchError>(&result))
+                auto result = fn_parser(doc.location(), args[0].first, args[0].second, untied.context);
+                if (auto *error = std::get_if<FnMatchError>(&result)) {
+                    const InclusionPolicy policy = Config::instance().createInclusionPolicy();
+                    if (!doc.isInternal() || InclusionFilter::processInternalDocs(policy))
                         errors.emplace_back(*error);
-                    else
-                        node = std::get<Node*>(result);
+                } else {
+                    node = std::get<Node*>(result);
                 }
             } else if (topic == COMMAND_MACRO) {
                 node = parseMacroArg(doc.location(), args[0].first);
@@ -880,16 +963,19 @@ CppCodeParser::processTopicArgs(const UntiedDocumentation &untied)
                 tied.emplace_back(TiedDocumentation{doc, node});
             }
         } else if (args.size() > 1) {
+            // Find nodes for each of the topic commands and add them to shared
+            // comment nodes.
             QList<SharedCommentNode *> sharedCommentNodes;
             for (const auto &arg : std::as_const(args)) {
                 node = nullptr;
                 if (topic == COMMAND_FN) {
-                    if (Config::instance().showInternal() || !doc.isInternal()) {
-                        auto result = fn_parser(doc.location(), arg.first, arg.second, untied.context);
-                        if (auto *error = std::get_if<FnMatchError>(&result))
+                    auto result = fn_parser(doc.location(), arg.first, arg.second, untied.context);
+                    if (auto *error = std::get_if<FnMatchError>(&result)) {
+                        const InclusionPolicy policy = Config::instance().createInclusionPolicy();
+                        if (!doc.isInternal() || InclusionFilter::processInternalDocs(policy))
                             errors.emplace_back(*error);
-                        else
-                            node = std::get<Node*>(result);
+                    } else {
+                        node = std::get<Node*>(result);
                     }
                 } else if (topic == COMMAND_MACRO) {
                     node = parseMacroArg(doc.location(), arg.first);
@@ -914,8 +1000,12 @@ CppCodeParser::processTopicArgs(const UntiedDocumentation &untied)
                     }
                 }
             }
-            for (auto *scn : sharedCommentNodes)
-                scn->sort();
+            for (auto *scn : sharedCommentNodes) {
+                // Don't sort function nodes - preserve the order from \fn commands
+                // for position-dependent \overload primary behavior
+                if (!scn->collective().isEmpty() && !scn->collective().first()->isFunction())
+                    scn->sort();
+            }
         }
     }
     return std::make_pair(tied, errors);
@@ -930,11 +1020,11 @@ static void checkModuleInclusion(Node *n)
     if (n->physicalModuleName().isEmpty()) {
         if (n->isInAPI() && !n->name().isEmpty()) {
             switch (n->nodeType()) {
-            case Node::Class:
-            case Node::Struct:
-            case Node::Union:
-            case Node::Namespace:
-            case Node::HeaderFile:
+            case NodeType::Class:
+            case NodeType::Struct:
+            case NodeType::Union:
+            case NodeType::Namespace:
+            case NodeType::HeaderFile:
                 break;
             default:
                 return;
@@ -953,33 +1043,28 @@ static void checkModuleInclusion(Node *n)
 void CppCodeParser::processMetaCommands(const std::vector<TiedDocumentation> &tied)
 {
     for (auto [doc, node] : tied) {
-        processMetaCommands(doc, node);
         node->setDoc(doc);
+        processMetaCommands(doc, node);
         checkModuleInclusion(node);
         if (node->isAggregate()) {
             auto *aggregate = static_cast<Aggregate *>(node);
 
             if (!aggregate->includeFile()) {
-                Aggregate *parent = aggregate;
-                while (parent->physicalModuleName().isEmpty() && (parent->parent() != nullptr))
-                    parent = parent->parent();
+                const QString className = aggregate->name();
 
-                if (parent == aggregate)
-                    // TODO: Understand if the name can be empty.
-                    // In theory it should not be possible as
-                    // there would be no aggregate to refer to
-                    // such that this code is never reached.
-                    //
-                    // If the name can be empty, this would
-                    // endanger users of the include file down the
-                    // line, forcing them to ensure that, further
-                    // to there being an actual include file, that
-                    // include file is not an empty string, such
-                    // that we would require a different way to
-                    // generate the include file here.
-                    aggregate->setIncludeFile(aggregate->name());
-                else if (aggregate->includeFile())
-                    aggregate->setIncludeFile(*parent->includeFile());
+                // Resolution priority:
+                // 1. Convenience header (if exists in include paths)
+                // 2. Include-relative path from declLocation
+                // 3. Class name as last resort (only if non-empty)
+                QString includeFile = convenienceHeaderExists(className)
+                        ? className
+                        : computeIncludeSpelling(aggregate->declLocation());
+
+                if (includeFile.isEmpty() && !className.isEmpty())
+                    includeFile = className;
+
+                if (!includeFile.isEmpty())
+                    aggregate->setIncludeFile(includeFile);
             }
         }
     }
@@ -1001,7 +1086,7 @@ void CppCodeParser::processQmlNativeTypeCommand(Node *node, const QString &cmd, 
     auto classNode = database->findClassNode(arg.split(u"::"_s));
 
     if (!classNode) {
-        if (m_showLinkErrors) {
+        if (!Config::instance().get(CONFIG_NOLINKERRORS).asBool()) {
             location.warning(
                     QStringLiteral("C++ class %2 not found: \\%1 %2")
                             .arg(cmd, arg));
@@ -1017,6 +1102,103 @@ void CppCodeParser::processQmlNativeTypeCommand(Node *node, const QString &cmd, 
 
     qmlNode->setClassNode(classNode);
     classNode->insertQmlNativeType(qmlNode);
+    setQmlAttributesFromNativeType(qmlNode, classNode);
+}
+
+namespace {
+
+/*!
+    Strips compiler include path prefixes (-I, -isystem, etc.) from a path.
+    Returns an empty string if the path is an unrecognized flag.
+*/
+QString stripIncludePrefix(const QString &path)
+{
+    QString result = path.trimmed();
+
+    static const QStringList prefixes = {
+        "-I"_L1, "-isystem"_L1, "-iquote"_L1, "-idirafter"_L1
+    };
+
+    for (const QString &prefix : prefixes) {
+        if (result.startsWith(prefix)) {
+            result = result.mid(prefix.size()).trimmed();
+            return QDir::cleanPath(result);
+        }
+    }
+
+    // Skip framework paths and other unrecognized flags
+    if (result.startsWith(u'-'))
+        return {};
+
+    return QDir::cleanPath(result);
+}
+
+} // anonymous namespace
+
+/*!
+    Returns the cached list of cleaned include paths, combining both
+    command-line and qdocconf include paths with prefixes stripped.
+*/
+const QStringList &CppCodeParser::getCleanIncludePaths() const
+{
+    if (!m_includePathsCached) {
+        // Combine command-line and qdocconf include paths
+        QStringList rawPaths = Config::instance().includePaths();
+        rawPaths += Config::instance().getCanonicalPathList(
+                CONFIG_INCLUDEPATHS, Config::IncludePaths);
+
+        for (const QString &path : rawPaths) {
+            QString clean = stripIncludePrefix(path);
+            if (!clean.isEmpty() && !m_cleanIncludePaths.contains(clean))
+                m_cleanIncludePaths.append(clean);
+        }
+        m_includePathsCached = true;
+    }
+    return m_cleanIncludePaths;
+}
+
+/*!
+    Checks if a convenience header (extensionless file matching the class name)
+    exists in any of the configured include paths. Results are cached.
+
+    This supports Qt's convention where classes like QString have convenience
+    headers (extensionless files) that redirect to the actual header.
+*/
+bool CppCodeParser::convenienceHeaderExists(const QString &className) const
+{
+    if (className.isEmpty())
+        return false;
+
+    auto it = m_convenienceHeaderCache.constFind(className);
+    if (it != m_convenienceHeaderCache.constEnd())
+        return *it;
+
+    bool exists = false;
+    for (const QString &includePath : getCleanIncludePaths()) {
+        QFileInfo candidate(includePath + u'/' + className);
+        if (candidate.exists() && candidate.isFile()) {
+            exists = true;
+            break;
+        }
+    }
+
+    m_convenienceHeaderCache.insert(className, exists);
+    return exists;
+}
+
+/*!
+    Returns the basename of the header file from the declaration location.
+
+    This provides a simple, reliable include spelling that works regardless
+    of the working directory or include path configuration. For more complex
+    include paths (like subdirectories), users can use \\inheaderfile.
+*/
+QString CppCodeParser::computeIncludeSpelling(const Location &loc) const
+{
+    if (loc.isEmpty())
+        return {};
+
+    return loc.fileName();
 }
 
 QT_END_NAMESPACE

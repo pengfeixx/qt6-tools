@@ -1,11 +1,13 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "qhelpsearchindexwriter_p.h"
 #include "qhelp_global.h"
 #include "qhelpdbreader_p.h"
 #include "qhelpenginecore.h"
 
+#include <QtTools/qttools-config.h>
 #include <QtCore/qdatastream.h>
 #include <QtCore/qdatetime.h>
 #include <QtCore/qdir.h>
@@ -13,7 +15,9 @@
 #include <QtCore/qtextstream.h>
 #include <QtCore/qurl.h>
 #include <QtCore/qvariant.h>
-#include <QtGui/qtextdocument.h>
+#if QT_CONFIG(fullqthelp)
+#  include <QtGui/qtextdocument.h>
+#endif
 #include <QtSql/qsqldatabase.h>
 #include <QtSql/qsqldriver.h>
 #include <QtSql/qsqlerror.h>
@@ -488,12 +492,14 @@ void QHelpSearchIndexWriter::run()
                 if (fullFileName.endsWith(".txt"_L1)) {
                     title = fullFileName.mid(fullFileName.lastIndexOf(u'/') + 1);
                     contents = text.toHtmlEscaped();
+#if QT_CONFIG(fullqthelp)
                 } else {
                     QTextDocument doc;
                     doc.setHtml(text);
 
                     title = doc.metaInformation(QTextDocument::DocumentTitle).toHtmlEscaped();
                     contents = doc.toPlainText().toHtmlEscaped();
+#endif
                 }
 
                 writer.insertDoc(namespaceName, attributesString, fullFileName, title, contents);

@@ -13,6 +13,7 @@ file. The C++ classes must also be documented
 documented with the QML \l{topic-commands}{topic commands}:
 
 \list
+\li \l{qmlattachedmethod-command}{\\qmlattachedmethod}
 \li \l{qmlattachedproperty-command}{\\qmlattachedproperty}
 \li \l{qmlattachedsignal-command}{\\qmlattachedsignal}
 \li \l{qmlvaluetype-command}{\\qmlvaluetype}
@@ -126,17 +127,18 @@ marked with the \l{c-command}{\\c} command in the case of boolean values.
 \section1 Enumerations
 
 QML enumerations are documented as QML properties with the
-\l{qmlproperty-command}{\\qmlproperty} command. The type of the property
-is \c enumeration. Use the \l{value-command}{\\value} command to document
+\l{qmlenum-command}{\\qmlenum} command. Use the \l{value-command}{\\value} command to document
 the enum values. Add the type name as a prefix to each value, separated by
 a period (.), as QDoc does not do this automatically.
 
 \snippet examples/qml.qdoc.sample enums
 
-The QDoc comment lists the values of the enumeration. If the enumeration is
-implemented in C++, the documentation may link to the corresponding C++
-enumeration. However, the QDoc comment should advise that the enumeration
-is a C++ enumeration.
+The QDoc comment lists the values of the enumeration.
 
+If the enumeration is implemented in C++, consider using the
+\l{qmlenumeratorsfrom-command}{\\qmlenumeratorsfrom} command.
+If this isn't possible, the documentation may also directly link to the
+corresponding C++ enumeration. However, the QDoc comment should then advise that
+the enumeration is a C++ enumeration.
 */
 

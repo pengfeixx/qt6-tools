@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 //
 //  W A R N I N G
@@ -16,8 +17,10 @@
 #define QTVARIANTPROPERTY_H
 
 #include "qtpropertybrowser_p.h"
-#include <QtCore/QVariant>
-#include <QtGui/QIcon>
+
+#include <QtGui/qicon.h>
+
+#include <QtCore/qvariant.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -28,7 +31,7 @@ class QtVariantPropertyManager;
 class QtVariantProperty : public QtProperty
 {
 public:
-    ~QtVariantProperty();
+    ~QtVariantProperty() override;
     QVariant value() const;
     QVariant attributeValue(const QString &attribute) const;
     int valueType() const;
@@ -47,8 +50,8 @@ class QtVariantPropertyManager : public QtAbstractPropertyManager
 {
     Q_OBJECT
 public:
-    QtVariantPropertyManager(QObject *parent = 0);
-    ~QtVariantPropertyManager();
+    QtVariantPropertyManager(QObject *parent = nullptr);
+    ~QtVariantPropertyManager() override;
 
     virtual QtVariantProperty *addProperty(int propertyType, const QString &name = QString());
 
@@ -93,8 +96,9 @@ class QtVariantEditorFactory : public QtAbstractEditorFactory<QtVariantPropertyM
 {
     Q_OBJECT
 public:
-    QtVariantEditorFactory(QObject *parent = 0);
-    ~QtVariantEditorFactory();
+    QtVariantEditorFactory(QObject *parent = nullptr);
+    ~QtVariantEditorFactory() override;
+
 protected:
     void connectPropertyManager(QtVariantPropertyManager *manager) override;
     QWidget *createEditor(QtVariantPropertyManager *manager, QtProperty *property,

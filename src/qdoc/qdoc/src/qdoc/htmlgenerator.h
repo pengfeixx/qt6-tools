@@ -5,6 +5,7 @@
 #define HTMLGENERATOR_H
 
 #include "codemarker.h"
+#include "genustypes.h"
 #include "xmlgenerator.h"
 #include "filesystem/fileresolver.h"
 
@@ -27,14 +28,14 @@ public:
 
     void initializeGenerator() override;
     void terminateGenerator() override;
-    QString format() override;
+    QString format() const override;
     void generateDocs() override;
 
     QString protectEnc(const QString &string);
     static QString protect(const QString &string);
 
 protected:
-    void generateExampleFilePage(const Node *en, ResolvedFile resolved_file, CodeMarker *marker) override;
+    void generateExampleFilePage(const PageNode *en, ResolvedFile resolved_file, CodeMarker *marker) override;
     qsizetype generateAtom(const Atom *atom, const Node *relative, CodeMarker *marker) override;
     void generateCppReferencePage(Aggregate *aggregate, CodeMarker *marker) override;
     void generateProxyPage(Aggregate *aggregate, CodeMarker *marker) override;
@@ -51,16 +52,21 @@ private:
     void generateNavigationBar(const QString &title, const Node *node, CodeMarker *marker,
                                const QString &buildversion, bool tableItems = false);
     void generateHeader(const QString &title, const Node *node = nullptr,
-                        CodeMarker *marker = nullptr);
-    void generateTitle(const QString &title, const Text &subTitle, SubTitleSize subTitleSize,
+                        CodeMarker *marker = nullptr, const QString &keywords = {});
+    void generateTitle(const Text &title, const Text &subTitle, SubTitleSize subTitleSize,
                        const Node *relative, CodeMarker *marker);
+    void generateTitle(const QString &title, const Text &subTitle, SubTitleSize subTitleSize,
+                       const Node *relative, CodeMarker *marker)
+    {
+        generateTitle(Text() << title, subTitle, subTitleSize, relative, marker);
+    }
     void generateFooter(const Node *node = nullptr);
     void generateRequisites(Aggregate *inner, CodeMarker *marker);
     void generateQmlRequisites(QmlTypeNode *qcn, CodeMarker *marker);
     void generateBrief(const Node *node, CodeMarker *marker, const Node *relative = nullptr,
                        bool addLink = true);
     void generateTableOfContents(const Node *node, CodeMarker *marker,
-                                 QList<Section> *sections = nullptr);
+                                 const SectionVector *sections = nullptr);
     void generateSidebar();
     QString generateAllMembersFile(const Section &section, CodeMarker *marker);
     QString generateAllQmlMembersFile(const Sections &sections, CodeMarker *marker);
@@ -71,6 +77,10 @@ private:
                                 const NodeMultiMap &nodeMap);
     void generateAnnotatedList(const Node *relative, CodeMarker *marker, const NodeList &nodes,
                                Qt::SortOrder sortOrder = Qt::AscendingOrder);
+    void generateAnnotatedList(const Node *relative, CodeMarker *marker, const NodeMultiMap &nodeMap,
+                               Qt::SortOrder sortOrder = Qt::AscendingOrder);
+    [[nodiscard]] NodeMultiMap includedAnnotatedMembers(const Node *relative,
+                                                        const NodeList &nodes) const;
     void generateCompactList(ListType listType, const Node *relative, const NodeMultiMap &classMap,
                              bool includeAlphabet, const QString &commonPrefix);
     void generateFunctionIndex(const Node *relative);
@@ -89,12 +99,15 @@ private:
                           Section::Style style, bool alignNames = false);
     void generateSectionInheritedList(const Section &section, const Node *relative);
     QString highlightedCode(const QString &markedCode, const Node *relative,
-                            bool alignNames = false, Node::Genus genus = Node::DontCare);
+                            bool alignNames = false, Genus genus = Genus::DontCare);
 
     void generateFullName(const Node *apparentNode, const Node *relative,
                           const Node *actualNode = nullptr);
+    void generateSourceLink(const Node *node);
     void generateDetailedMember(const Node *node, const PageNode *relative, CodeMarker *marker);
     void generateLink(const Atom *atom);
+
+    void emitGroupHeader(const SharedCommentNode *scn);
 
     QString fileBase(const Node *node) const override;
     QString fileName(const Node *node);
@@ -145,6 +158,7 @@ private:
     QString m_address {};
     bool m_noNavigationBar { false };
     QString m_project {};
+    QString m_productName {};
     QString m_projectDescription {};
     QString m_projectUrl {};
     QString m_navigationLinks {};

@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 //
 //  W A R N I N G
@@ -15,8 +16,8 @@
 #ifndef GRADIENTVIEW_H
 #define GRADIENTVIEW_H
 
-#include <QtWidgets/QWidget>
-#include <QtCore/QHash>
+#include <QtWidgets/qwidget.h>
+#include <QtCore/qhash.h>
 #include "ui_qtgradientview.h"
 
 QT_BEGIN_NAMESPACE
@@ -29,7 +30,7 @@ class QtGradientView : public QWidget
 {
     Q_OBJECT
 public:
-    QtGradientView(QWidget *parent = 0);
+    explicit QtGradientView(QWidget *parent = nullptr);
 
     void setGradientManager(QtGradientManager *manager);
     QtGradientManager *gradientManager() const;

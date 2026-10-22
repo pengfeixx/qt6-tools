@@ -1,18 +1,21 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "qtgradientstopswidget_p.h"
 #include "qtgradientstopsmodel_p.h"
 
-#include <QtCore/QMap>
-#include <QtCore/QHash>
-#include <QtCore/QMimeData>
-#include <QtGui/QImage>
-#include <QtGui/QPainter>
-#include <QtWidgets/QScrollBar>
-#include <QtGui/QMouseEvent>
-#include <QtWidgets/QRubberBand>
-#include <QtWidgets/QMenu>
+#include <QtWidgets/qmenu.h>
+#include <QtWidgets/qrubberband.h>
+#include <QtWidgets/qscrollbar.h>
+
+#include <QtGui/qevent.h>
+#include <QtGui/qimage.h>
+#include <QtGui/qpainter.h>
+
+#include <QtCore/qhash.h>
+#include <QtCore/qmap.h>
+#include <QtCore/qmimedata.h>
 
 QT_BEGIN_NAMESPACE
 

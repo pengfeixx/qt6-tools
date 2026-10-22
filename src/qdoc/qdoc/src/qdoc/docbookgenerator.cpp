@@ -15,13 +15,19 @@
 #include "examplenode.h"
 #include "functionnode.h"
 #include "generator.h"
+#include "genustypes.h"
+#include "inclusionfilter.h"
 #include "node.h"
+#include "nodecontext.h"
 #include "propertynode.h"
 #include "quoter.h"
 #include "qdocdatabase.h"
 #include "qmlpropertynode.h"
 #include "sharedcommentnode.h"
+#include "template_declaration.h"
 #include "typedefnode.h"
+#include "utilities.h"
+#include "textutils.h"
 #include "variablenode.h"
 
 #include <QtCore/qlist.h>
@@ -142,6 +148,7 @@ void DocBookGenerator::initializeGenerator()
     m_config = &Config::instance();
 
     m_project = m_config->get(CONFIG_PROJECT).asString();
+    m_productName = m_config->get(CONFIG_PRODUCTNAME).asString();
 
     m_projectDescription = m_config->get(CONFIG_DESCRIPTION).asString();
     if (m_projectDescription.isEmpty() && !m_project.isEmpty())
@@ -157,7 +164,7 @@ void DocBookGenerator::initializeGenerator()
     m_useITS = m_config->get(format() + Config::dot + "its").asBool();
 }
 
-QString DocBookGenerator::format()
+QString DocBookGenerator::format() const
 {
     return "DocBook";
 }
@@ -202,14 +209,14 @@ qsizetype DocBookGenerator::generateAtom(const Atom *atom, const Node *relative,
 {
     Q_ASSERT(m_writer);
     // From HtmlGenerator::generateAtom, without warning generation.
-    int idx = 0;
-    int skipAhead = 0;
-    Node::Genus genus = Node::DontCare;
+    qsizetype idx = 0;
+    qsizetype skipAhead = 0;
+    Genus genus = Genus::DontCare;
 
     switch (atom->type()) {
     case Atom::AutoLink:
         // Allow auto-linking to nodes in API reference
-        genus = Node::API;
+        genus = Genus::API;
         Q_FALLTHROUGH();
     case Atom::NavAutoLink:
         if (!m_inLink && !m_inContents && !m_inSectionHeading) {
@@ -276,7 +283,11 @@ qsizetype DocBookGenerator::generateAtom(const Atom *atom, const Node *relative,
         break;
     case Atom::Code:
         m_writer->writeStartElement(dbNamespace, "programlisting");
-        m_writer->writeAttribute("language", "cpp");
+        // Recover an additional string containing the code language, if present.
+        if (atom->strings().count() == 2)
+            m_writer->writeAttribute("language", atom->string(1));
+        else
+            m_writer->writeAttribute("language", "cpp");
         if (m_useITS)
             m_writer->writeAttribute(itsNamespace, "translate", "no");
         m_writer->writeCharacters(plainCode(removeCodeMarkers(atom->string())));
@@ -295,6 +306,13 @@ qsizetype DocBookGenerator::generateAtom(const Atom *atom, const Node *relative,
         break;
     case Atom::DetailsLeft:
     case Atom::DetailsRight:
+        break;
+    case Atom::DetailsSummaryLeft: { // Ignore/skip \details summary
+        qsizetype offset{ 0 };
+        std::ignore = atom->find(Atom::DetailsSummaryRight, &offset);
+        skipAhead += offset;
+    } break;
+    case Atom::DetailsSummaryRight:
         break;
     case Atom::DivLeft:
     case Atom::DivRight:
@@ -348,6 +366,10 @@ qsizetype DocBookGenerator::generateAtom(const Atom *atom, const Node *relative,
                         "trademark" : "phrase");
             if (m_useITS)
                 m_writer->writeAttribute(itsNamespace, "translate", "no");
+        } else if (atom->string() == ATOM_FORMATTING_NOTRANSLATE) {
+            m_writer->writeStartElement(dbNamespace, "phrase");
+            if (m_useITS)
+                m_writer->writeAttribute(itsNamespace, "translate", "no");
         } else {
             relative->location().warning(QStringLiteral("Unsupported formatting: %1").arg(atom->string()));
         }
@@ -360,7 +382,8 @@ qsizetype DocBookGenerator::generateAtom(const Atom *atom, const Node *relative,
             || atom->string() == ATOM_FORMATTING_TELETYPE
             || atom->string() == ATOM_FORMATTING_PARAMETER
             || atom->string() == ATOM_FORMATTING_UICONTROL
-            || atom->string() == ATOM_FORMATTING_TRADEMARK) {
+            || atom->string() == ATOM_FORMATTING_TRADEMARK
+            || atom->string() == ATOM_FORMATTING_NOTRANSLATE) {
             m_writer->writeEndElement();
         } else if (atom->string() == ATOM_FORMATTING_LINK) {
             if (atom->string() == ATOM_FORMATTING_TELETYPE)
@@ -371,7 +394,7 @@ qsizetype DocBookGenerator::generateAtom(const Atom *atom, const Node *relative,
         }
         break;
     case Atom::AnnotatedList: {
-        if (const CollectionNode *cn = m_qdb->getCollectionNode(atom->string(), Node::Group))
+        if (const CollectionNode *cn = m_qdb->getCollectionNode(atom->string(), NodeType::Group))
             generateList(cn, atom->string(), Generator::sortOrder(atom->strings().last()));
         } break;
     case Atom::GeneratedList: {
@@ -413,20 +436,20 @@ qsizetype DocBookGenerator::generateAtom(const Atom *atom, const Node *relative,
             generateCompactList(relative, things, true, rootName, atom->string());
         } else if ((idx = atom->string().indexOf(QStringLiteral("bymodule"))) != -1) {
             QString moduleName = atom->string().mid(idx + 8).trimmed();
-            Node::NodeType moduleType = typeFromString(atom);
+            NodeType moduleType = typeFromString(atom);
             QDocDatabase *qdb = QDocDatabase::qdocDB();
             if (const CollectionNode *cn = qdb->getCollectionNode(moduleName, moduleType)) {
                 NodeMap map;
                 switch (moduleType) {
-                case Node::Module:
+                case NodeType::Module:
                     // classesbymodule <module_name>
                     map = cn->getMembers([](const Node *n){ return n->isClassNode(); });
                     break;
-                case Node::QmlModule:
+                case NodeType::QmlModule:
                     if (atom->string().contains(QLatin1String("qmlvaluetypes")))
-                        map = cn->getMembers(Node::QmlValueType); // qmlvaluetypesbymodule <module_name>
+                        map = cn->getMembers(NodeType::QmlValueType); // qmlvaluetypesbymodule <module_name>
                     else
-                        map = cn->getMembers(Node::QmlType);      // qmltypesbymodule <module_name>
+                        map = cn->getMembers(NodeType::QmlType);      // qmltypesbymodule <module_name>
                     break;
                 default: // fall back to generating all members
                     generateAnnotatedList(relative, cn->members(), atom->string(), Auto, sortOrder);
@@ -465,7 +488,7 @@ qsizetype DocBookGenerator::generateAtom(const Atom *atom, const Node *relative,
             generateList(relative, atom->string());
             hasGeneratedSomething = true; // Approximation, because there is
                                           // some nontrivial logic in generateList.
-        } else if (const auto *cn = m_qdb->getCollectionNode(atom->string(), Node::Group); cn) {
+        } else if (const auto *cn = m_qdb->getCollectionNode(atom->string(), NodeType::Group); cn) {
             generateAnnotatedList(cn, cn->members(), atom->string(), ItemizedList, sortOrder);
             hasGeneratedSomething = true; // Approximation
         }
@@ -605,7 +628,8 @@ qsizetype DocBookGenerator::generateAtom(const Atom *atom, const Node *relative,
             QString file_name{QFileInfo{file.get_path()}.fileName()};
 
             // TODO: [uncentralized-output-directory-structure]
-            Config::copyFile(relative->doc().location(), file.get_path(), file_name, outputDir() + QLatin1String("/images"));
+            Config::copyFile(relative->doc().location(), file.get_path(), file_name,
+                             "%1/%2"_L1.arg(outputDir(), imagesOutputDir()));
 
             if (atom->next() && !atom->next()->string().isEmpty()
                 && atom->next()->type() == Atom::ImageText) {
@@ -616,14 +640,15 @@ qsizetype DocBookGenerator::generateAtom(const Atom *atom, const Node *relative,
             m_writer->writeStartElement(dbNamespace, "imageobject");
             newLine();
             m_writer->writeEmptyElement(dbNamespace, "imagedata");
+            const auto &imgPath = "%1/%2"_L1.arg(imagesOutputDir(), file_name);
             // TODO: [uncentralized-output-directory-structure]
-            m_writer->writeAttribute("fileref", "images/" + file_name);
+            m_writer->writeAttribute("fileref", imgPath);
             newLine();
             m_writer->writeEndElement(); // imageobject
             newLine();
 
             // TODO: [uncentralized-output-directory-structure]
-            setImageFileName(relative, "images/" + file_name);
+            setImageFileName(relative, imgPath);
         }
 
         m_writer->writeEndElement(); // [inline]mediaobject
@@ -669,7 +694,7 @@ qsizetype DocBookGenerator::generateAtom(const Atom *atom, const Node *relative,
         skipAhead = 1;
     } break;
     case Atom::LinkNode: {
-        const Node *node = CodeMarker::nodeForString(atom->string());
+        const Node *node = static_cast<const Node*>(Utilities::nodeForString(atom->string()));
         beginLink(linkForNode(node, relative), node, relative);
         skipAhead = 1;
     } break;
@@ -702,7 +727,7 @@ qsizetype DocBookGenerator::generateAtom(const Atom *atom, const Node *relative,
             newLine();
 
             m_threeColumnEnumValueTable = isThreeColumnEnumValueTable(atom);
-            if (m_threeColumnEnumValueTable && relative->nodeType() == Node::Enum) {
+            if (m_threeColumnEnumValueTable && relative->isEnumType(Genus::CPP)) {
                 // With three columns, if not in \enum topic, skip the value column
                 m_writer->writeTextElement(dbNamespace, "th", "Value");
                 newLine();
@@ -720,7 +745,7 @@ qsizetype DocBookGenerator::generateAtom(const Atom *atom, const Node *relative,
         } else { // No recognized list type.
             m_writer->writeStartElement(dbNamespace, "orderedlist");
 
-            if (atom->next() != nullptr && atom->next()->string().toInt() > 1)
+            if (atom->next() != nullptr && atom->next()->string().toInt() != 1)
                 m_writer->writeAttribute("startingnumber", atom->next()->string());
 
             if (atom->string() == ATOM_LIST_UPPERALPHA)
@@ -762,7 +787,7 @@ qsizetype DocBookGenerator::generateAtom(const Atom *atom, const Node *relative,
             m_writer->writeEndElement(); // td
             newLine();
 
-            if (relative->nodeType() == Node::Enum) {
+            if (relative->isEnumType(Genus::CPP)) {
                 const auto enume = static_cast<const EnumNode *>(relative);
                 QString itemValue = enume->itemValue(atom->next()->string());
 
@@ -1010,7 +1035,7 @@ qsizetype DocBookGenerator::generateAtom(const Atom *atom, const Node *relative,
         const Atom *next = atom->next();
         QString id{""};
         if (matchAhead(atom, Atom::Target)) {
-            id = Utilities::asAsciiPrintable(next->string());
+            id = TextUtils::asAsciiPrintable(next->string());
             next = next->next();
             ++skipAhead;
         }
@@ -1057,7 +1082,7 @@ qsizetype DocBookGenerator::generateAtom(const Atom *atom, const Node *relative,
         QString id{""};
         bool hasTarget {false};
         if (matchAhead(atom, Atom::Target)) {
-            id = Utilities::asAsciiPrintable(atom->next()->string());
+            id = TextUtils::asAsciiPrintable(atom->next()->string());
             ++skipAhead;
             hasTarget = true;
         }
@@ -1147,21 +1172,23 @@ qsizetype DocBookGenerator::generateAtom(const Atom *atom, const Node *relative,
         m_writer->writeEndElement(); // th if m_inTableHeader, otherwise td
         newLine();
         break;
-    case Atom::TableOfContents:
-        Q_FALLTHROUGH();
+    case Atom::TableOfContentsLeft:
+        // Skip \toc .. \endtoc content, handled separately by TOCWriter
+        std::ignore = atom->find(Atom::TableOfContentsRight, &skipAhead);
+        break;
     case Atom::Keyword:
         break;
     case Atom::Target:
         // Sometimes, there is a \target just before a section title with the same ID. Only output one xml:id.
         if (matchAhead(atom, Atom::SectionRight) && matchAhead(atom->next(), Atom::SectionLeft)) {
-            QString nextId = Utilities::asAsciiPrintable(
+            QString nextId = TextUtils::asAsciiPrintable(
                     Text::sectionHeading(atom->next()->next()).toString());
-            QString ownId = Utilities::asAsciiPrintable(atom->string());
+            QString ownId = TextUtils::asAsciiPrintable(atom->string());
             if (nextId == ownId)
                 break;
         }
 
-        writeAnchor(Utilities::asAsciiPrintable(atom->string()));
+        writeAnchor(TextUtils::asAsciiPrintable(atom->string()));
         break;
     case Atom::UnhandledFormat:
         m_writer->writeStartElement(dbNamespace, "emphasis");
@@ -1302,15 +1329,15 @@ void DocBookGenerator::generateList(const Node *relative, const QString &selecto
 {
     // From HtmlGenerator::generateList, without warnings, changing prototype.
     CNMap cnm;
-    Node::NodeType type = Node::NoType;
+    NodeType type = NodeType::NoType;
     if (selector == QLatin1String("overviews"))
-        type = Node::Group;
+        type = NodeType::Group;
     else if (selector == QLatin1String("cpp-modules"))
-        type = Node::Module;
+        type = NodeType::Module;
     else if (selector == QLatin1String("qml-modules"))
-        type = Node::QmlModule;
+        type = NodeType::QmlModule;
 
-    if (type != Node::NoType) {
+    if (type != NodeType::NoType) {
         NodeList nodeList;
         m_qdb->mergeCollections(type, cnm, relative);
         const QList<CollectionNode *> collectionList = cnm.values();
@@ -1342,8 +1369,11 @@ void DocBookGenerator::generateAnnotatedList(const Node *relative, const NodeLis
         return;
 
     // Do nothing if all items are internal or obsolete.
-    if (std::all_of(nodeList.cbegin(), nodeList.cend(), [](const Node *n) {
-        return n->isInternal() || n->isDeprecated(); })) {
+    const InclusionPolicy policy = Config::instance().createInclusionPolicy();
+    if (std::all_of(nodeList.cbegin(), nodeList.cend(), [&policy](const Node *n) {
+            const NodeContext context = n->createContext();
+            return !InclusionFilter::isIncluded(policy, context) || n->isDeprecated();
+        })) {
         return;
     }
 
@@ -1370,8 +1400,10 @@ void DocBookGenerator::generateAnnotatedList(const Node *relative, const NodeLis
             std::sort(members.rbegin(), members.rend(), Node::nodeSortKeyOrNameLessThan);
         else
             std::sort(members.begin(), members.end(), Node::nodeSortKeyOrNameLessThan);
+        const InclusionPolicy policy = Config::instance().createInclusionPolicy();
         for (const auto &node : std::as_const(members)) {
-            if (node->isInternal() || node->isDeprecated())
+            const NodeContext context = node->createContext();
+            if (!InclusionFilter::isIncluded(policy, context) || node->isDeprecated())
                 continue;
 
             if (noItemsHaveTitle) {
@@ -1517,11 +1549,17 @@ void DocBookGenerator::generateCompactList(const Node *relative, const NodeMulti
         newLine();
     }
 
+    // Build a map of all duplicate names across the entire list
+    QHash<QString, int> nameOccurrences;
+    for (const auto &[key, node] : nmm.asKeyValueRange()) {
+        QStringList pieces{node->fullName(relative).split("::"_L1)};
+        const QString &name{pieces.last()};
+        nameOccurrences[name]++;
+    }
+
     // Actual output.
     int curParNr = 0;
     int curParOffset = 0;
-    QString previousName;
-    bool multipleOccurrences = false;
 
     m_writer->writeStartElement(dbNamespace, "variablelist");
     m_writer->writeAttribute("role", selector);
@@ -1580,16 +1618,13 @@ void DocBookGenerator::generateCompactList(const Node *relative, const NodeMulti
             // (more than one piece).
             QStringList pieces{it.value()->fullName(relative).split("::"_L1)};
             const auto &name{pieces.last()};
-            next = it;
-            ++next;
-            if (name != previousName)
-                multipleOccurrences = false;
-            if ((next != paragraph[curParNr].end()) && (name == next.value()->name())) {
-                multipleOccurrences = true;
-                previousName = name;
+
+            // Add module disambiguation if there are multiple types with the same name
+            if (nameOccurrences[name] > 1) {
+                const QString moduleName = it.value()->isQmlNode() ? it.value()->logicalModuleName()
+                                                                   : it.value()->tree()->camelCaseModuleName();
+                pieces.last().append(": %1"_L1.arg(moduleName));
             }
-            if (multipleOccurrences && pieces.size() == 1)
-                pieces.last().append(": "_L1.arg(it.value()->tree()->camelCaseModuleName()));
 
             // Write the link to the element, which is identical if the element is obsolete or not.
             m_writer->writeStartElement(dbNamespace, "link");
@@ -1732,7 +1767,13 @@ bool DocBookGenerator::generateSince(const Node *node)
     // From Generator::generateSince.
     if (!node->since().isEmpty()) {
         m_writer->writeStartElement(dbNamespace, "para");
-        m_writer->writeCharacters("This " + typeString(node) + " was introduced in ");
+        if (node->isSharedCommentNode()) {
+            const auto &collective = static_cast<const SharedCommentNode *>(node)->collective();
+            QString typeStr = collective.size() > 1 ? typeString(collective.first()) + "s" : typeString(node);
+            m_writer->writeCharacters("These " + typeStr + " were introduced in ");
+        } else {
+            m_writer->writeCharacters("This " + typeString(node) + " was introduced in ");
+        }
         m_writer->writeCharacters(formatSince(node) + ".");
         m_writer->writeEndElement(); // para
         newLine();
@@ -1747,8 +1788,35 @@ bool DocBookGenerator::generateSince(const Node *node)
     Generate the DocBook header for the file, including the abstract.
     Equivalent to calling generateTitle and generateBrief in HTML.
 */
-void DocBookGenerator::generateHeader(const QString &title, const QString &subTitle,
+void DocBookGenerator::generateHeader(const Text &title, const QString &subTitle,
                                       const Node *node)
+{
+    generateHeader(title, node);
+
+    if (!subTitle.isEmpty()) {
+        m_writer->writeStartElement(dbNamespace, "subtitle");
+        if (isApiGenus(node->genus()) && m_useITS)
+            m_writer->writeAttribute(itsNamespace, "translate", "no");
+        m_writer->writeCharacters(subTitle);
+        m_writer->writeEndElement(); // subtitle
+        newLine();
+    }
+
+    finishHeader(node);
+}
+
+/*!
+    Generates the opening portion of the DocBook header — \c{<db:info>}
+    and the title element. The caller emits any subtitle (text-only or
+    element-rich) directly into the writer afterwards, then calls
+    finishHeader() to close \c{<db:info>} and write the abstract.
+
+    Class pages with template declarations use this two-step form so the
+    subtitle element can carry \c{<db:link>} elements for concept
+    references — content that wouldn't survive the plain-text subtitle
+    path the 3-argument overload uses.
+*/
+void DocBookGenerator::generateHeader(const Text &title, const Node *node)
 {
     refMap.clear();
 
@@ -1756,23 +1824,24 @@ void DocBookGenerator::generateHeader(const QString &title, const QString &subTi
     m_writer->writeStartElement(dbNamespace, "info");
     newLine();
     m_writer->writeStartElement(dbNamespace, "title");
-    if (node->genus() & Node::API && m_useITS)
+    if (isApiGenus(node->genus()) && m_useITS)
         m_writer->writeAttribute(itsNamespace, "translate", "no");
-    m_writer->writeCharacters(title);
+    generateText(title, node);
     m_writer->writeEndElement(); // title
     newLine();
+}
 
-    if (!subTitle.isEmpty()) {
-        m_writer->writeStartElement(dbNamespace, "subtitle");
-        if (node->genus() & Node::API && m_useITS)
-            m_writer->writeAttribute(itsNamespace, "translate", "no");
-        m_writer->writeCharacters(subTitle);
-        m_writer->writeEndElement(); // subtitle
-        newLine();
-    }
-
-    if (!m_project.isEmpty()) {
-        m_writer->writeTextElement(dbNamespace, "productname", m_project);
+/*!
+    Emits the tail of the DocBook header — product, edition, titleabbrev,
+    navigation links, and abstract — then closes \c{<db:info>}. Used as
+    the companion to the two-argument \c{generateHeader} overload that
+    leaves the info element open for the caller to emit a rich subtitle.
+*/
+void DocBookGenerator::finishHeader(const Node *node)
+{
+    if (!m_productName.isEmpty() || !m_project.isEmpty()) {
+        m_writer->writeTextElement(dbNamespace, "productname", m_productName.isEmpty() ?
+                m_project : m_productName);
         newLine();
     }
 
@@ -1880,11 +1949,8 @@ void DocBookGenerator::generateHeader(const QString &title, const QString &subTi
             brief << "The " << ns->name()
                   << " namespace includes the following elements from module "
                   << ns->tree()->camelCaseModuleName() << ". The full namespace is "
-                  << "documented in module " << NS->tree()->camelCaseModuleName()
-                  << Atom(Atom::LinkNode, fullDocumentLocation(NS))
-                  << Atom(Atom::FormattingLeft, ATOM_FORMATTING_LINK)
-                  << Atom(Atom::String, " here.")
-                  << Atom(Atom::FormattingRight, ATOM_FORMATTING_LINK);
+                  << "documented in module " << NS->tree()->camelCaseModuleName();
+            addNodeLink(brief, fullDocumentLocation(NS), " here.");
         } else {
             brief = node->doc().briefText();
         }
@@ -1905,8 +1971,7 @@ void DocBookGenerator::generateHeader(const QString &title, const QString &subTi
         generatedSomething |= generateStatus(node);
         generatedSomething |= generateSince(node);
         generatedSomething |= generateThreadSafeness(node);
-        generatedSomething |= generateComparisonCategory(node);
-        generatedSomething |= generateComparisonList(node);
+        generatedSomething |= generateComparisonTable(node);
 
         // An abstract cannot be empty, hence use the project description.
         if (!generatedSomething)
@@ -1952,6 +2017,43 @@ void DocBookGenerator::generateSimpleLink(const QString &href, const QString &te
     m_writer->writeEndElement(); // link
 }
 
+/*!
+    Writes the extra synopsis string \a extra, processing any embedded
+    <@extref> tags and converting them to DocBook links.
+*/
+void DocBookGenerator::generateExtraSynopsis(const QString &extra)
+{
+    static const QHash<QString, QString> extrefUrls = {
+        {u"cpp-explicitly-defaulted"_s,
+         u"https://en.cppreference.com/w/cpp/language/function#Defaulted_functions"_s},
+        {u"cpp-deleted-functions"_s,
+         u"https://en.cppreference.com/w/cpp/language/function#Deleted_functions"_s},
+    };
+
+    static const QRegularExpression extrefRegex(
+            u"<@extref target=\"([^\"]+)\">([^<]*)</@extref>"_s);
+
+    qsizetype pos = 0;
+    auto it = extrefRegex.globalMatch(extra);
+    while (it.hasNext()) {
+        auto match = it.next();
+        if (match.capturedStart() > pos)
+            m_writer->writeCharacters(extra.mid(pos, match.capturedStart() - pos));
+
+        QString target = match.captured(1);
+        QString text = match.captured(2);
+        QString url = extrefUrls.value(target);
+        if (!url.isEmpty())
+            generateSimpleLink(url, text);
+        else
+            m_writer->writeCharacters(text);
+
+        pos = match.capturedEnd();
+    }
+    if (pos < extra.size())
+        m_writer->writeCharacters(extra.mid(pos));
+}
+
 void DocBookGenerator::generateObsoleteMembers(const Sections &sections)
 {
     // From HtmlGenerator::generateObsoleteMembersFile.
@@ -1960,8 +2062,8 @@ void DocBookGenerator::generateObsoleteMembers(const Sections &sections)
     if (!sections.hasObsoleteMembers(&summary_spv, &details_spv))
         return;
 
-    Aggregate *aggregate = sections.aggregate();
-    startSection("obsolete", "Obsolete Members for " + aggregate->name());
+    const Aggregate *aggregate = sections.aggregate();
+    startSection("obsolete", "Obsolete Members for " + aggregate->plainFullName());
 
     m_writer->writeStartElement(dbNamespace, "para");
     m_writer->writeStartElement(dbNamespace, "emphasis");
@@ -2008,7 +2110,7 @@ void DocBookGenerator::generateObsoleteQmlMembers(const Sections &sections)
     if (!sections.hasObsoleteMembers(&summary_spv, &details_spv))
         return;
 
-    Aggregate *aggregate = sections.aggregate();
+    const Aggregate *aggregate = sections.aggregate();
     startSection("obsolete", "Obsolete Members for " + aggregate->name());
 
     m_writer->writeStartElement(dbNamespace, "para");
@@ -2105,16 +2207,16 @@ void DocBookGenerator::generateRequisite(const QString &description, const QStri
  * \internal
  * Generates the CMake (\a description) requisites
  */
-void DocBookGenerator::generateCMakeRequisite(const QStringList &values)
+void DocBookGenerator::generateCMakeRequisite(const QString &findPackage, const QString &linkLibraries)
 {
     const QString description("CMake");
     generateStartRequisite(description);
-    m_writer->writeCharacters(values.first());
+    m_writer->writeCharacters(findPackage);
     m_writer->writeEndElement(); // para
     newLine();
 
     m_writer->writeStartElement(dbNamespace, "para");
-    m_writer->writeCharacters(values.last());
+    m_writer->writeCharacters(linkLibraries);
     generateEndRequisite();
 }
 
@@ -2125,7 +2227,7 @@ void DocBookGenerator::generateSortedNames(const ClassNode *cn, const QList<Rela
     QList<RelatedClass>::ConstIterator r = rc.constBegin();
     while (r != rc.constEnd()) {
         ClassNode *rcn = (*r).m_node;
-        if (rcn && rcn->access() == Access::Public && rcn->status() != Node::Internal
+        if (rcn && rcn->access() == Access::Public && !rcn->isInternal()
             && !rcn->doc().isEmpty()) {
             classMap[rcn->plainFullName(cn).toLower()] = rcn;
         }
@@ -2138,17 +2240,26 @@ void DocBookGenerator::generateSortedNames(const ClassNode *cn, const QList<Rela
     int index = 0;
     for (const QString &className : classNames) {
         generateFullName(classMap.value(className), cn);
-        m_writer->writeCharacters(Utilities::comma(index++, classNames.size()));
+        m_writer->writeCharacters(TextUtils::comma(index++, classNames.size()));
     }
 }
 
-void DocBookGenerator::generateSortedQmlNames(const Node *base, const NodeList &subs)
+void DocBookGenerator::generateSortedQmlNames(const Node *base, const QStringList &knownTypes,
+                                              const NodeList &subs)
 {
     // From Generator::appendSortedQmlNames.
     QMap<QString, Node *> classMap;
+    QStringList typeNames(knownTypes);
+    for (const auto sub : subs)
+        typeNames << sub->name();
 
-    for (auto sub : subs)
-        classMap[sub->plainFullName(base).toLower()] = sub;
+    for (auto sub : subs) {
+        QString key{sub->plainFullName(base).toLower()};
+        // Disambiguate with '(<QML module name>)' if there are clashing type names
+        if (typeNames.count(sub->name()) > 1)
+            key.append(": (%1)"_L1.arg(sub->logicalModuleName()));
+        classMap[key] = sub;
+    }
 
     QStringList names = classMap.keys();
     names.sort();
@@ -2156,7 +2267,9 @@ void DocBookGenerator::generateSortedQmlNames(const Node *base, const NodeList &
     int index = 0;
     for (const QString &name : names) {
         generateFullName(classMap.value(name), base);
-        m_writer->writeCharacters(Utilities::comma(index++, names.size()));
+        if (name.contains(':'))
+            m_writer->writeCharacters(name.section(':', 1));
+        m_writer->writeCharacters(TextUtils::comma(index++, names.size()));
     }
 }
 
@@ -2185,26 +2298,20 @@ void DocBookGenerator::generateRequisites(const Aggregate *aggregate)
     if (aggregate->isClassNode() || aggregate->isNamespace()) {
         // CMake and QT variable.
         const CollectionNode *cn =
-                m_qdb->getCollectionNode(aggregate->physicalModuleName(), Node::Module);
-        if (cn && !cn->qtCMakeComponent().isEmpty()) {
-            const QString qtComponent = "Qt" + QString::number(QT_VERSION_MAJOR);
-            const QString findpackageText = "find_package(" + qtComponent
-                    + " REQUIRED COMPONENTS " + cn->qtCMakeComponent() + ")";
-            const QString targetItem =
-                    cn->qtCMakeTargetItem().isEmpty() ? cn->qtCMakeComponent() : cn->qtCMakeTargetItem();
-            const QString targetLinkLibrariesText = "target_link_libraries(mytarget PRIVATE "
-                    + qtComponent + "::" + targetItem + ")";
-            const QStringList cmakeInfo { findpackageText, targetLinkLibrariesText };
-            generateCMakeRequisite(cmakeInfo);
+                m_qdb->getCollectionNode(aggregate->physicalModuleName(), NodeType::Module);
+
+        if (const auto result = cmakeRequisite(cn)) {
+            generateCMakeRequisite(result->first, result->second);
         }
+
         if (cn && !cn->qtVariable().isEmpty())
             generateRequisite("qmake", "QT += " + cn->qtVariable());
     }
 
-    if (aggregate->nodeType() == Node::Class) {
+    if (aggregate->nodeType() == NodeType::Class) {
         // Native type information.
         auto *classe = const_cast<ClassNode *>(static_cast<const ClassNode *>(aggregate));
-        if (classe && classe->isQmlNativeType() && classe->status() != Node::Internal) {
+        if (classe && classe->isQmlNativeType() && !classe->isInternal()) {
             generateStartRequisite("In QML");
 
             qsizetype idx{0};
@@ -2214,14 +2321,16 @@ void DocBookGenerator::generateRequisites(const Aggregate *aggregate)
             for (const auto &item : std::as_const(nativeTypes)) {
                 generateFullName(item, classe);
                 m_writer->writeCharacters(
-                        Utilities::comma(idx++, nativeTypes.size()));
+                        TextUtils::comma(idx++, nativeTypes.size()));
             }
             generateEndRequisite();
         }
 
         // Inherits.
         QList<RelatedClass>::ConstIterator r;
-        if (!classe->baseClasses().isEmpty()) {
+        const auto *metaTags = classe ? classe->doc().metaTagMap() : nullptr;
+        bool suppressInherits = metaTags && metaTags->contains(u"qdoc-suppress-inheritance"_s);
+        if (classe && !suppressInherits && !classe->baseClasses().isEmpty()) {
             generateStartRequisite("Inherits");
 
             r = classe->baseClasses().constBegin();
@@ -2235,7 +2344,7 @@ void DocBookGenerator::generateRequisites(const Aggregate *aggregate)
                     else if ((*r).m_access == Access::Private)
                         m_writer->writeCharacters(" (private)");
                     m_writer->writeCharacters(
-                            Utilities::comma(index++, classe->baseClasses().size()));
+                            TextUtils::comma(index++, classe->baseClasses().size()));
                 }
                 ++r;
             }
@@ -2297,9 +2406,17 @@ void DocBookGenerator::generateRequisites(const Aggregate *aggregate)
 void DocBookGenerator::generateQmlRequisites(const QmlTypeNode *qcn)
 {
     // From HtmlGenerator::generateQmlRequisites, but simplified: no need to store all the elements,
-    // they can be produced one by one.
+    // they can be produced one by one and still keep the right order.
     if (!qcn)
         return;
+
+    const QString importText = "Import Statement";
+    const QString sinceText = "Since";
+    const QString inheritedByText = "Inherited By";
+    const QString inheritsText = "Inherits";
+    const QString nativeTypeText = "In C++";
+    const QString groupText = "Group";
+    const QString statusText = "Status";
 
     const CollectionNode *collection = qcn->logicalModule();
 
@@ -2307,17 +2424,29 @@ void DocBookGenerator::generateQmlRequisites(const QmlTypeNode *qcn)
     QmlTypeNode::subclasses(qcn, subs);
 
     QmlTypeNode *base = qcn->qmlBaseNode();
-    while (base && base->isInternal()) {
+    const InclusionPolicy policy = Config::instance().createInclusionPolicy();
+    while (base) {
+        const NodeContext context = base->createContext();
+        if (InclusionFilter::isIncluded(policy, context))
+            break;
         base = base->qmlBaseNode();
     }
 
     // Skip import statement for \internal collections
-    const bool generate_import_statement = !qcn->logicalModuleName().isEmpty() && (!collection || !collection->isInternal() || m_showInternal);
+    bool generate_import_statement = !qcn->logicalModuleName().isEmpty();
+    if (generate_import_statement && collection) {
+        const NodeContext context = collection->createContext();
+        generate_import_statement = InclusionFilter::isIncluded(policy, context);
+    }
     // Detect if anything is generated in this method. If not, exit early to avoid having an empty list.
     const bool generates_something = generate_import_statement || !qcn->since().isEmpty() || !subs.isEmpty() || base;
 
     if (!generates_something)
         return;
+
+    QStringList knownTypeNames{qcn->name()};
+    if (base)
+        knownTypeNames << base->name();
 
     // Start writing the elements as a list.
     m_writer->writeStartElement(dbNamespace, "variablelist");
@@ -2327,49 +2456,52 @@ void DocBookGenerator::generateQmlRequisites(const QmlTypeNode *qcn)
 
     if (generate_import_statement) {
         QStringList parts = QStringList() << "import" << qcn->logicalModuleName() << qcn->logicalModuleVersion();
-        generateRequisite("Import Statement", parts.join(' ').trimmed());
+        generateRequisite(importText, parts.join(' ').trimmed());
     }
 
     // Since and project.
     if (!qcn->since().isEmpty())
-        generateRequisite("Since:", formatSince(qcn));
+        generateRequisite(sinceText, formatSince(qcn));
 
-    // Inherited by.
-    if (!subs.isEmpty()) {
-        generateStartRequisite("Inherited By:");
-        generateSortedQmlNames(qcn, subs);
+    // Native type information.
+    ClassNode *cn = (const_cast<QmlTypeNode *>(qcn))->classNode();
+    if (cn && cn->isQmlNativeType() && !cn->isInternal()) {
+        generateStartRequisite(nativeTypeText);
+        generateSimpleLink(fullDocumentLocation(cn), cn->name());
         generateEndRequisite();
     }
 
     // Inherits.
     if (base) {
-        const Node *otherNode = nullptr;
-        Atom a = Atom(Atom::LinkNode, CodeMarker::stringForNode(base));
-        QString link = getAutoLink(&a, qcn, &otherNode);
-
-        generateStartRequisite("Inherits:");
-        generateSimpleLink(link, base->name());
+        generateStartRequisite(inheritsText);
+        generateSimpleLink(fullDocumentLocation(base), base->name());
+        // Disambiguate with '(<QML module name>)' if there are clashing type names
+        for (const auto sub : std::as_const(subs)) {
+            if (knownTypeNames.contains(sub->name())) {
+                m_writer->writeCharacters(" (%1)"_L1.arg(base->logicalModuleName()));
+                break;
+            }
+        }
         generateEndRequisite();
     }
 
-    // Native type information.
-    ClassNode *cn = (const_cast<QmlTypeNode *>(qcn))->classNode();
-    if (cn && cn->isQmlNativeType() && cn->status() != Node::Internal) {
-        generateStartRequisite("In C++:");
-        generateSimpleLink(fullDocumentLocation(cn), cn->name());
+    // Inherited by.
+    if (!subs.isEmpty()) {
+        generateStartRequisite(inheritedByText);
+        generateSortedQmlNames(qcn, knownTypeNames, subs);
         generateEndRequisite();
     }
 
     // Group.
     if (!qcn->groupNames().empty()) {
-        generateStartRequisite("Group");
+        generateStartRequisite(groupText);
         generateGroupReferenceText(qcn);
         generateEndRequisite();
     }
 
     // Status.
     if (auto status = formatStatus(qcn, m_qdb); status)
-        generateRequisite("Status:", status.value());
+        generateRequisite(statusText, status.value());
 
     m_writer->writeEndElement(); // variablelist
     newLine();
@@ -2379,7 +2511,7 @@ bool DocBookGenerator::generateStatus(const Node *node)
 {
     // From Generator::generateStatus.
     switch (node->status()) {
-    case Node::Active:
+    case Status::Active:
         // Output the module 'state' description if set.
         if (node->isModule() || node->isQmlModule()) {
             const QString &state = static_cast<const CollectionNode*>(node)->state();
@@ -2395,7 +2527,7 @@ bool DocBookGenerator::generateStatus(const Node *node)
                 return true;
             }
         }
-        if (const auto version = node->deprecatedSince(); !version.isEmpty()) {
+        if (const auto &version = node->deprecatedSince(); !version.isEmpty()) {
             m_writer->writeStartElement(dbNamespace, "para");
             m_writer->writeCharacters("This " + typeString(node)
                                       + " is scheduled for deprecation in version "
@@ -2405,17 +2537,20 @@ bool DocBookGenerator::generateStatus(const Node *node)
             return true;
         }
         return false;
-    case Node::Preliminary:
+    case Status::Preliminary:
         m_writer->writeStartElement(dbNamespace, "para");
         m_writer->writeStartElement(dbNamespace, "emphasis");
         m_writer->writeAttribute("role", "bold");
-        m_writer->writeCharacters("This " + typeString(node)
-                                  + " is under development and is subject to change.");
+        m_writer->writeCharacters(
+                Config::instance()
+                        .get(CONFIG_PRELIMINARY + Config::dot + CONFIG_DESCRIPTION)
+                        .asString()
+                        .replace('\1'_L1, typeString(node)));
         m_writer->writeEndElement(); // emphasis
         m_writer->writeEndElement(); // para
         newLine();
         return true;
-    case Node::Deprecated:
+    case Status::Deprecated:
         m_writer->writeStartElement(dbNamespace, "para");
         if (node->isAggregate()) {
             m_writer->writeStartElement(dbNamespace, "emphasis");
@@ -2434,7 +2569,8 @@ bool DocBookGenerator::generateStatus(const Node *node)
         m_writer->writeEndElement(); // para
         newLine();
         return true;
-    case Node::Internal:
+    case Status::Internal:
+    case Status::InternalAuto:
     default:
         return false;
     }
@@ -2654,7 +2790,7 @@ void DocBookGenerator::generateBody(const Node *node)
             generateReimplementsClause(fn);
         else if (node->isProperty()) {
             if (static_cast<const PropertyNode *>(node)->propertyType() != PropertyNode::PropertyType::StandardProperty)
-                generateAddendum(node, BindableProperty, nullptr, false);
+                generateAddendum(node, BindableProperty, nullptr, AdmonitionPrefix::None);
         }
 
         // Generate the body.
@@ -2666,19 +2802,22 @@ void DocBookGenerator::generateBody(const Node *node)
         // Output what is after the main body.
         if (fn) {
             if (fn->isQmlSignal())
-                generateAddendum(node, QmlSignalHandler, nullptr, true);
+                generateAddendum(node, QmlSignalHandler, nullptr, AdmonitionPrefix::Note);
             if (fn->isPrivateSignal())
-                generateAddendum(node, PrivateSignal, nullptr, true);
+                generateAddendum(node, PrivateSignal, nullptr, AdmonitionPrefix::Note);
             if (fn->isInvokable())
-                generateAddendum(node, Invokable, nullptr, true);
+                generateAddendum(node, Invokable, nullptr, AdmonitionPrefix::Note);
             if (fn->hasAssociatedProperties())
-                generateAddendum(node, AssociatedProperties, nullptr, true);
+                generateAddendum(node, AssociatedProperties, nullptr, AdmonitionPrefix::Note);
+            if (fn->hasOverloads() && fn->doc().hasOverloadCommand()
+                && !fn->isSignal() && !fn->isSlot())
+                generateAddendum(node, OverloadNote, nullptr, AdmonitionPrefix::None);
         }
 
         // Warning generation skipped with respect to Generator::generateBody.
     }
 
-    generateEnumValuesForQmlProperty(node, nullptr);
+    generateEnumValuesForQmlReference(node, nullptr);
     generateRequiredLinks(node);
 }
 
@@ -2814,7 +2953,7 @@ void DocBookGenerator::generateFileList(const ExampleNode *en, bool images)
             continue;
         }
 
-        auto file{*maybe_resolved_file};
+        const auto &file{*maybe_resolved_file};
         if (images) addImageToCopy(en, file);
         else        generateExampleFilePage(en, file);
 
@@ -2836,7 +2975,7 @@ void DocBookGenerator::generateFileList(const ExampleNode *en, bool images)
 /*!
   Generate a file with the contents of a C++ or QML source file.
  */
-void DocBookGenerator::generateExampleFilePage(const Node *node, ResolvedFile resolved_file, CodeMarker*)
+void DocBookGenerator::generateExampleFilePage(const PageNode *node, ResolvedFile resolved_file, CodeMarker*)
 {
     // TODO: [generator-insufficient-structural-abstraction]
 
@@ -2850,7 +2989,7 @@ void DocBookGenerator::generateExampleFilePage(const Node *node, ResolvedFile re
     // Store current (active) writer
     QXmlStreamWriter *currentWriter = m_writer;
     m_writer = startDocument(en, resolved_file.get_query());
-    generateHeader(en->fullTitle(), en->subtitle(), en);
+    generateHeader(en->doc().title(), en->subtitle(), en);
 
     Text text;
     Quoter quoter;
@@ -2943,7 +3082,8 @@ void DocBookGenerator::generateAlsoList(const Node *node)
  */
 QXmlStreamWriter *DocBookGenerator::startGenericDocument(const Node *node, const QString &fileName)
 {
-    QFile *outFile = openSubPageFile(node, fileName);
+    Q_ASSERT(node->isPageNode());
+    QFile *outFile = openSubPageFile(static_cast<const PageNode*>(node), fileName);
     m_writer = new QXmlStreamWriter(outFile);
     m_writer->setAutoFormatting(false); // We need a precise handling of line feeds.
 
@@ -3006,34 +3146,54 @@ void DocBookGenerator::generateCppReferencePage(Node *node)
     const auto aggregate = static_cast<const Aggregate *>(node);
 
     QString title;
-    QString rawTitle;
-    QString fullTitle;
+    Text titleText;
+    const QString typeWord{aggregate->typeWord(true)};
     if (aggregate->isNamespace()) {
-        rawTitle = aggregate->plainName();
-        fullTitle = aggregate->plainFullName();
-        title = rawTitle + " Namespace";
+        title = "%1 %2"_L1.arg(aggregate->plainFullName(), typeWord);
     } else if (aggregate->isClass()) {
-        rawTitle = aggregate->plainName();
-
-        auto templateDecl = node->templateDecl();
-        if (templateDecl)
-            fullTitle = QString("%1 %2 ").arg((*templateDecl).to_qstring(), aggregate->typeWord(false));
-
-        fullTitle += aggregate->plainFullName();
-        title = rawTitle + QLatin1Char(' ') + aggregate->typeWord(true);
+        title = "%1 %2"_L1.arg(aggregate->plainFullName(), typeWord);
     } else if (aggregate->isHeader()) {
-        title = fullTitle = rawTitle = aggregate->fullTitle();
+        title = aggregate->fullTitle();
+        if (!aggregate->doc().title().isEmpty())
+            titleText << aggregate->name() << " - "_L1 << aggregate->doc().title();
     }
-
-    QString subtitleText;
-    if (rawTitle != fullTitle)
-        subtitleText = fullTitle;
 
     // Start producing the DocBook file.
     m_writer = startDocument(node);
 
-    // Info container.
-    generateHeader(title, subtitleText, aggregate);
+    // Info container. Class pages with a template declaration emit the
+    // subtitle in two steps so concept references in the template head
+    // can surface as <db:link> elements inside the subtitle text rather
+    // than being flattened to characters.
+    if (aggregate->isClass()) {
+        if (auto templateDecl = node->templateDecl()) {
+            if (!titleText.isEmpty())
+                generateHeader(titleText, aggregate);
+            else
+                generateHeader(Text() << title, aggregate);
+
+            m_writer->writeStartElement(dbNamespace, "subtitle");
+            if (isApiGenus(aggregate->genus()) && m_useITS)
+                m_writer->writeAttribute(itsNamespace, "translate", "no");
+            generateTemplateDecl(&*templateDecl, aggregate);
+            m_writer->writeCharacters(" "_L1 + aggregate->typeWord(false) + " "_L1
+                                      + aggregate->plainFullName());
+            m_writer->writeEndElement(); // subtitle
+            newLine();
+
+            finishHeader(aggregate);
+        } else {
+            if (!titleText.isEmpty())
+                generateHeader(titleText, QString(), aggregate);
+            else
+                generateHeader(title, QString(), aggregate);
+        }
+    } else {
+        if (!titleText.isEmpty())
+            generateHeader(titleText, QString(), aggregate);
+        else
+            generateHeader(title, QString(), aggregate);
+    }
 
     generateRequisites(aggregate);
     generateStatus(aggregate);
@@ -3051,11 +3211,8 @@ void DocBookGenerator::generateCppReferencePage(Node *node)
         endSection();
     }
 
-    Sections sections(const_cast<Aggregate *>(aggregate));
-    SectionVector sectionVector =
-            (aggregate->isNamespace() || aggregate->isHeader()) ?
-                    sections.stdDetailsSections() :
-                    sections.stdCppClassDetailsSections();
+    Sections sections(aggregate);
+    const SectionVector &sectionVector = sections.detailsSections();
     for (const Section &section : sectionVector) {
         if (section.members().isEmpty())
             continue;
@@ -3063,10 +3220,7 @@ void DocBookGenerator::generateCppReferencePage(Node *node)
         startSection(section.title().toLower(), section.title());
 
         for (const Node *member : section.members()) {
-            if (member->access() == Access::Private) // ### check necessary?
-                continue;
-
-            if (member->nodeType() != Node::Class) {
+            if (member->nodeType() != NodeType::Class) {
                 // This function starts its own section.
                 generateDetailedMember(member, aggregate);
             } else {
@@ -3180,8 +3334,10 @@ void DocBookGenerator::generateDocBookSynopsis(const Node *node)
         m_writer->writeTextElement(dbNamespace, "varname", node->plainName());
         newLine();
     } else if (node->isEnumType()) {
-        m_writer->writeTextElement(dbNamespace, "enumname", node->plainName());
-        newLine();
+        if (!enumNode->isAnonymous()) {
+            m_writer->writeTextElement(dbNamespace, "enumname", node->plainName());
+            newLine();
+        }
     } else if (node->isQmlProperty()) {
         QString name = node->name();
         if (qpn->isAttached())
@@ -3192,19 +3348,24 @@ void DocBookGenerator::generateDocBookSynopsis(const Node *node)
         m_writer->writeTextElement(dbNamespace, "varname", name);
         newLine();
 
+        const bool readOnly = qpn->isReadOnly();
+        const bool required = qpn->isRequired();
+
+        // Semantic modifiers for DocBook (machine-readable)
         if (qpn->isAttached()) {
             m_writer->writeTextElement(dbNamespace, "modifier", "attached");
             newLine();
         }
-        if (!(const_cast<QmlPropertyNode *>(qpn))->isReadOnly()) {
+        if (!readOnly) {
             m_writer->writeTextElement(dbNamespace, "modifier", "writable");
             newLine();
         }
-        if ((const_cast<QmlPropertyNode *>(qpn))->isRequired()) {
+        if (required) {
             m_writer->writeTextElement(dbNamespace, "modifier", "required");
             newLine();
         }
-        if (qpn->isReadOnly()) {
+        // Presentation modifiers (human-readable)
+        if (readOnly) {
             generateModifier("[read-only]");
             newLine();
         }
@@ -3259,8 +3420,12 @@ void DocBookGenerator::generateDocBookSynopsis(const Node *node)
             newLine();
         }
 
-        if (functionNode->isDefault())
+        if (functionNode->isImplicitlyGenerated())
+            generateModifier("implicit");
+        else if (functionNode->isExplicitlyDefaulted())
             generateModifier("default");
+        else if (functionNode->isDeletedAsWritten())
+            generateModifier("delete");
         if (functionNode->isFinal())
             generateModifier("final");
         if (functionNode->isOverride())
@@ -3339,8 +3504,12 @@ void DocBookGenerator::generateDocBookSynopsis(const Node *node)
             signature += " override";
         if (functionNode->isPureVirtual())
             signature += " = 0";
-        else if (functionNode->isDefault())
+        else if (functionNode->isExplicitlyDefaulted())
             signature += " = default";
+        else if (functionNode->isDeletedAsWritten())
+            signature += " = delete";
+        if (const auto &req = functionNode->trailingRequiresClause(); req && !req->isEmpty())
+            signature += " requires " + *req;
         generateSynopsisInfo("signature", signature);
     }
 
@@ -3365,16 +3534,18 @@ void DocBookGenerator::generateDocBookSynopsis(const Node *node)
 
     // Status.
     switch (node->status()) {
-    case Node::Active:
+    case Status::Active:
         generateSynopsisInfo("status", "active");
         break;
-    case Node::Preliminary:
-        generateSynopsisInfo("status", "preliminary");
+    case Status::Preliminary:
+        generateSynopsisInfo("status",
+                             Config::instance().get(CONFIG_PRELIMINARY).asString().toLower());
         break;
-    case Node::Deprecated:
+    case Status::Deprecated:
         generateSynopsisInfo("status", "deprecated");
         break;
-    case Node::Internal:
+    case Status::Internal:
+    case Status::InternalAuto:
         generateSynopsisInfo("status", "internal");
         break;
     default:
@@ -3391,30 +3562,26 @@ void DocBookGenerator::generateDocBookSynopsis(const Node *node)
         if (!aggregate->since().isEmpty())
             generateSynopsisInfo("since", formatSince(aggregate));
 
-        if (aggregate->nodeType() == Node::Class || aggregate->nodeType() == Node::Namespace) {
+        if (aggregate->nodeType() == NodeType::Class || aggregate->nodeType() == NodeType::Namespace) {
             // CMake and QT variable.
             if (!aggregate->physicalModuleName().isEmpty()) {
                 const CollectionNode *cn =
-                        m_qdb->getCollectionNode(aggregate->physicalModuleName(), Node::Module);
-                if (cn && !cn->qtCMakeComponent().isEmpty()) {
-                    const QString qtComponent = "Qt" + QString::number(QT_VERSION_MAJOR);
-                    const QString findpackageText = "find_package(" + qtComponent
-                            + " REQUIRED COMPONENTS " + cn->qtCMakeComponent() + ")";
-                    const QString targetLinkLibrariesText =
-                            "target_link_libraries(mytarget PRIVATE " + qtComponent + "::" + cn->qtCMakeComponent()
-                            + ")";
-                    generateSynopsisInfo("cmake-find-package", findpackageText);
-                    generateSynopsisInfo("cmake-target-link-libraries", targetLinkLibrariesText);
+                        m_qdb->getCollectionNode(aggregate->physicalModuleName(), NodeType::Module);
+
+                if (const auto result = cmakeRequisite(cn)) {
+                    generateSynopsisInfo("cmake-find-package", result->first);
+                    generateSynopsisInfo("cmake-target-link-libraries", result->second);
                 }
+
                 if (cn && !cn->qtVariable().isEmpty())
                     generateSynopsisInfo("qmake", "QT += " + cn->qtVariable());
             }
         }
 
-        if (aggregate->nodeType() == Node::Class) {
+        if (aggregate->nodeType() == NodeType::Class) {
             // Native type
             auto *classe = const_cast<ClassNode *>(static_cast<const ClassNode *>(aggregate));
-            if (classe && classe->isQmlNativeType() && classe->status() != Node::Internal) {
+            if (classe && classe->isQmlNativeType() && !classe->isInternal()) {
                 m_writer->writeStartElement(dbNamespace, "synopsisinfo");
                 m_writer->writeAttribute("role", "nativeTypeFor");
 
@@ -3423,7 +3590,7 @@ void DocBookGenerator::generateDocBookSynopsis(const Node *node)
 
                 for (auto item : std::as_const(nativeTypes)) {
                     const Node *otherNode{nullptr};
-                    Atom a = Atom(Atom::LinkNode, CodeMarker::stringForNode(item));
+                    Atom a = Atom(Atom::LinkNode, Utilities::stringForNode(item));
                     const QString &link = getAutoLink(&a, aggregate, &otherNode);
                     generateSimpleLink(link, item->name());
                 }
@@ -3449,7 +3616,7 @@ void DocBookGenerator::generateDocBookSynopsis(const Node *node)
                             m_writer->writeCharacters(" (private)");
                         }
                         m_writer->writeCharacters(
-                                Utilities::comma(index++, classe->baseClasses().size()));
+                                TextUtils::comma(index++, classe->baseClasses().size()));
                     }
                     ++r;
                 }
@@ -3490,29 +3657,46 @@ void DocBookGenerator::generateDocBookSynopsis(const Node *node)
         if (!qcn->since().isEmpty())
             generateSynopsisInfo("since", formatSince(qcn));
 
+        QmlTypeNode *base = qcn->qmlBaseNode();
+        const InclusionPolicy policy = Config::instance().createInclusionPolicy();
+        while (base) {
+            const NodeContext context = base->createContext();
+            if (InclusionFilter::isIncluded(policy, context))
+                break;
+            base = base->qmlBaseNode();
+        }
+
+        QStringList knownTypeNames{qcn->name()};
+        if (base)
+            knownTypeNames << base->name();
+
         // Inherited by.
         NodeList subs;
         QmlTypeNode::subclasses(qcn, subs);
         if (!subs.isEmpty()) {
             m_writer->writeTextElement(dbNamespace, "synopsisinfo");
             m_writer->writeAttribute("role", "inheritedBy");
-            generateSortedQmlNames(qcn, subs);
+            generateSortedQmlNames(qcn, knownTypeNames, subs);
             m_writer->writeEndElement(); // synopsisinfo
             newLine();
         }
 
         // Inherits.
-        QmlTypeNode *base = qcn->qmlBaseNode();
-        while (base && base->isInternal())
-            base = base->qmlBaseNode();
         if (base) {
             const Node *otherNode = nullptr;
-            Atom a = Atom(Atom::LinkNode, CodeMarker::stringForNode(base));
+            Atom a = Atom(Atom::LinkNode, Utilities::stringForNode(base));
             QString link = getAutoLink(&a, base, &otherNode);
 
             m_writer->writeTextElement(dbNamespace, "synopsisinfo");
             m_writer->writeAttribute("role", "inherits");
             generateSimpleLink(link, base->name());
+            // Disambiguate with '(<QML module name>)' if there are clashing type names
+            for (const auto sub : std::as_const(subs)) {
+                if (knownTypeNames.contains(sub->name())) {
+                    m_writer->writeCharacters(" (%1)"_L1.arg(base->logicalModuleName()));
+                    break;
+                }
+            }
             m_writer->writeEndElement(); // synopsisinfo
             newLine();
         }
@@ -3520,9 +3704,9 @@ void DocBookGenerator::generateDocBookSynopsis(const Node *node)
         // Native type
         ClassNode *cn = (const_cast<QmlTypeNode *>(qcn))->classNode();
 
-        if (cn && cn->isQmlNativeType() && (cn->status() != Node::Internal)) {
+        if (cn && cn->isQmlNativeType() && !cn->isInternal()) {
             const Node *otherNode = nullptr;
-            Atom a = Atom(Atom::LinkNode, CodeMarker::stringForNode(qcn));
+            Atom a = Atom(Atom::LinkNode, Utilities::stringForNode(qcn));
             QString link = getAutoLink(&a, cn, &otherNode);
 
             m_writer->writeTextElement(dbNamespace, "synopsisinfo");
@@ -3614,7 +3798,7 @@ QString taggedNode(const Node *node)
     // From CodeMarker::taggedNode, but without the tag part (i.e. only the QML specific case
     // remaining).
     // TODO: find a better name for this.
-    if (node->nodeType() == Node::QmlType && node->name().startsWith(QLatin1String("QML:")))
+    if (node->nodeType() == NodeType::QmlType && node->name().startsWith(QLatin1String("QML:")))
         return node->name().mid(4);
     return node->name();
 }
@@ -3648,11 +3832,11 @@ void DocBookGenerator::typified(const QString &string, const Node *relative, boo
                     result.truncate(0);
 
                     // Add the link, logic from HtmlGenerator::highlightedCode.
-                    const Node *n = m_qdb->findTypeNode(pendingWord, relative, Node::DontCare);
+                    const Node *n = m_qdb->findTypeNode(pendingWord, relative, Genus::DontCare);
                     QString href;
                     if (!(n && n->isQmlBasicType())
                         || (relative
-                            && (relative->genus() == n->genus() || Node::DontCare == n->genus()))) {
+                            && (relative->genus() == n->genus() || Genus::DontCare == n->genus()))) {
                         href = linkForNode(n, relative);
                     }
 
@@ -3681,6 +3865,212 @@ void DocBookGenerator::typified(const QString &string, const Node *relative, boo
     m_writer->writeCharacters(result);
 }
 
+/*!
+    \internal
+
+    Emits the requires-clause \a text, wrapping each occurrence of a name
+    in \a concepts in a \c{<db:link>} element pointing at the corresponding
+    documented \\concept page. Concept identifiers consist of letters,
+    digits, and underscores only, so word-boundary regex matches reliably
+    isolate standalone concept tokens. The list is sorted longest first so
+    prefix-sharing concept names (such as \c{Hashable} and
+    \c{HashableContainer}) substitute correctly without overlap.
+
+    If a concept name doesn't resolve to a documented entity through
+    \c{QDocDatabase::findConceptNode}, the bare text is written instead —
+    matching the graceful-degradation behavior of the legacy HTML
+    \c{<@concept>} resolver branch.
+*/
+void DocBookGenerator::generateRequiresClauseText(const QString &text,
+                                                  const QStringList &concepts,
+                                                  const Node *relative)
+{
+    if (concepts.isEmpty()) {
+        m_writer->writeCharacters(text);
+        return;
+    }
+
+    QStringList sorted = concepts;
+    std::sort(sorted.begin(), sorted.end(),
+              [](const QString &a, const QString &b) { return a.size() > b.size(); });
+
+    // Match by the unqualified spelling that appears in the clause text, but
+    // carry the fully-qualified name as the lookup target: concepts register
+    // under their qualified name, so a namespaced reference such as
+    // traits::Sortable resolves only through the qualified target.
+    struct Match { qsizetype offset; qsizetype length; QString name; QString target; };
+    QList<Match> matches;
+    QList<bool> occupied(text.size(), false);
+
+    for (const QString &concept_name : sorted) {
+        const QString unqualified = concept_name.section("::"_L1, -1);
+        const QRegularExpression re("\\b"_L1
+            + QRegularExpression::escape(unqualified) + "\\b"_L1);
+        auto it = re.globalMatch(text);
+        while (it.hasNext()) {
+            const auto m = it.next();
+            const qsizetype start = m.capturedStart();
+            const qsizetype len = m.capturedLength();
+            bool clear = true;
+            for (qsizetype i = start; i < start + len; ++i) {
+                if (occupied[i]) {
+                    clear = false;
+                    break;
+                }
+            }
+            if (!clear)
+                continue;
+            for (qsizetype i = start; i < start + len; ++i)
+                occupied[i] = true;
+            matches.append({start, len, unqualified, concept_name});
+        }
+    }
+
+    std::sort(matches.begin(), matches.end(),
+              [](const Match &a, const Match &b) { return a.offset < b.offset; });
+
+    qsizetype pos = 0;
+    for (const auto &m : matches) {
+        if (m.offset > pos)
+            m_writer->writeCharacters(text.mid(pos, m.offset - pos));
+        const Node *n = m_qdb->findConceptNode(m.target);
+        if (n)
+            generateSimpleLink(linkForNode(n, relative), m.name);
+        else
+            m_writer->writeCharacters(m.name);
+        pos = m.offset + m.length;
+    }
+    if (pos < text.size())
+        m_writer->writeCharacters(text.mid(pos));
+}
+
+/*!
+    \internal
+
+    Emits one template parameter into the current writer position. When the
+    parameter carries a direct concept constraint (such as \c {Integral T}),
+    the unqualified concept name is wrapped in a \c{<db:link>} pointing at
+    the documented concept page; otherwise the plain \c{typename} keyword is
+    written. The shape mirrors \c {CppCodeMarker::formatTemplateParameter},
+    but writes DocBook XML directly rather than producing a marker string.
+*/
+void DocBookGenerator::generateTemplateParameter(const RelaxedTemplateParameter &param,
+                                                 const Node *relative)
+{
+    const auto &decl = param.valued_declaration;
+
+    if (param.template_declaration) {
+        // Template-template parameter: emit the nested template declaration
+        // recursively. The nested declaration is a TemplateDeclarationStorage,
+        // not a RelaxedTemplateDeclaration, so it has no requires_clause or
+        // referenced_concepts to consider.
+        m_writer->writeCharacters("template <"_L1);
+        bool first = true;
+        for (const auto &sub : param.template_declaration->parameters) {
+            if (sub.sfinae_constraint)
+                continue;
+            if (!first)
+                m_writer->writeCharacters(", "_L1);
+            generateTemplateParameter(sub, relative);
+            first = false;
+        }
+        m_writer->writeCharacters("> "_L1);
+    }
+
+    switch (param.kind) {
+    case RelaxedTemplateParameter::Kind::TypeTemplateParameter:
+        if (param.concept_name) {
+            const QString fq = QString::fromStdString(*param.concept_name);
+            const QString unqualified = fq.section("::"_L1, -1);
+            const Node *n = m_qdb->findConceptNode(fq);
+            if (n)
+                generateSimpleLink(linkForNode(n, relative), unqualified);
+            else
+                // No documented concept to link: keep the qualified spelling
+                // the author wrote rather than silently dropping the namespace.
+                m_writer->writeCharacters(fq);
+        } else {
+            m_writer->writeCharacters("typename"_L1);
+        }
+        break;
+    case RelaxedTemplateParameter::Kind::NonTypeTemplateParameter:
+        if (!decl.type.empty())
+            typified(QString::fromStdString(decl.type), relative, false, true);
+        break;
+    case RelaxedTemplateParameter::Kind::TemplateTemplateParameter:
+        m_writer->writeCharacters("typename"_L1);
+        break;
+    }
+
+    if (param.is_parameter_pack)
+        m_writer->writeCharacters("..."_L1);
+
+    if (!decl.name.empty()) {
+        m_writer->writeCharacters(" "_L1);
+        m_writer->writeCharacters(QString::fromStdString(decl.name));
+    }
+
+    if (!decl.initializer.empty()) {
+        m_writer->writeCharacters(" = "_L1);
+        if (param.kind == RelaxedTemplateParameter::Kind::TypeTemplateParameter
+            || param.kind == RelaxedTemplateParameter::Kind::TemplateTemplateParameter) {
+            typified(QString::fromStdString(decl.initializer), relative, false, true);
+        } else {
+            m_writer->writeCharacters(QString::fromStdString(decl.initializer));
+        }
+    }
+}
+
+/*!
+    \internal
+
+    Emits a full \c {template <...> requires ...} declaration element by
+    element so concept references inside both the parameter list and the
+    requires clause become \c{<db:link>} anchors. Multi-line layout kicks in
+    when the visible parameter count exceeds
+    \c{QDoc::MultilineTemplateParamThreshold}, mirroring
+    \c {RelaxedTemplateDeclaration::to_qstring_multiline()}.
+*/
+void DocBookGenerator::generateTemplateDecl(const RelaxedTemplateDeclaration *templateDecl,
+                                            const Node *relative)
+{
+    if (!templateDecl)
+        return;
+
+    const bool multiline = templateDecl->visibleParameterCount()
+            > QDoc::MultilineTemplateParamThreshold;
+
+    m_writer->writeCharacters("template <"_L1);
+    if (multiline)
+        m_writer->writeCharacters("\n"_L1);
+
+    bool first = true;
+    for (const auto &param : templateDecl->parameters) {
+        if (param.sfinae_constraint)
+            continue;
+        if (!first)
+            m_writer->writeCharacters(multiline ? ",\n"_L1 : ", "_L1);
+        if (multiline)
+            m_writer->writeCharacters("    "_L1);
+        generateTemplateParameter(param, relative);
+        first = false;
+    }
+
+    if (multiline)
+        m_writer->writeCharacters("\n"_L1);
+    m_writer->writeCharacters(">"_L1);
+
+    if (templateDecl->requires_clause && !templateDecl->requires_clause->empty()) {
+        m_writer->writeCharacters(" requires "_L1);
+        QStringList concepts;
+        concepts.reserve(int(templateDecl->referenced_concepts.size()));
+        for (const auto &s : templateDecl->referenced_concepts)
+            concepts.append(QString::fromStdString(s));
+        generateRequiresClauseText(QString::fromStdString(*templateDecl->requires_clause),
+                                   concepts, relative);
+    }
+}
+
 void DocBookGenerator::generateSynopsisName(const Node *node, const Node *relative,
                                             bool generateNameLink)
 {
@@ -3705,8 +4095,14 @@ void DocBookGenerator::generateParameter(const Parameter &parameter, const Node 
     const QString &pname = parameter.name();
     const QString &ptype = parameter.type();
     QString paramName;
+    qsizetype insertPos = !pname.isEmpty() ? parameter.nameInsertionPoint() : -1;
     if (!pname.isEmpty()) {
-        typified(ptype, relative, true, generateType);
+        if (insertPos >= 0) {
+            // Inside-out declarator: name goes inside the type.
+            typified(ptype.left(insertPos), relative, false, generateType);
+        } else {
+            typified(ptype, relative, true, generateType);
+        }
         paramName = pname;
     } else {
         paramName = ptype;
@@ -3717,6 +4113,9 @@ void DocBookGenerator::generateParameter(const Parameter &parameter, const Node 
         m_writer->writeCharacters(paramName);
         m_writer->writeEndElement(); // emphasis
     }
+
+    if (insertPos >= 0)
+        typified(ptype.mid(insertPos), relative, false, generateType);
 
     const QString &pvalue = parameter.defaultValue();
     if (generateExtra && !pvalue.isEmpty())
@@ -3735,8 +4134,10 @@ void DocBookGenerator::generateSynopsis(const Node *node, const Node *relative,
     const int MaxEnumValues = 6;
 
     if (generateExtra) {
-        if (auto extra = CodeMarker::extraSynopsis(node, style); !extra.isEmpty())
-            m_writer->writeCharacters(extra + " ");
+        if (auto extra = CodeMarker::extraSynopsis(node, style); !extra.isEmpty()) {
+            generateExtraSynopsis(extra);
+            m_writer->writeCharacters(u" "_s);
+        }
     }
 
     // Then generate the synopsis.
@@ -3749,18 +4150,28 @@ void DocBookGenerator::generateSynopsis(const Node *node, const Node *relative,
     }
 
     switch (node->nodeType()) {
-    case Node::Namespace:
+    case NodeType::Namespace:
         m_writer->writeCharacters("namespace ");
         m_writer->writeCharacters(namePrefix);
         generateSynopsisName(node, relative, generateNameLink);
         break;
-    case Node::Class:
+    case NodeType::Class:
         m_writer->writeCharacters("class ");
         m_writer->writeCharacters(namePrefix);
         generateSynopsisName(node, relative, generateNameLink);
         break;
-    case Node::Function: {
+    case NodeType::Function: {
         const auto func = (const FunctionNode *)node;
+
+        if (style == Section::Details) {
+            if (auto templateDecl = func->templateDecl()) {
+                generateTemplateDecl(&*templateDecl, relative);
+                if (templateDecl->visibleParameterCount() > QDoc::MultilineTemplateParamThreshold)
+                    m_writer->writeCharacters("\n"_L1);
+                else
+                    m_writer->writeCharacters(" "_L1);
+            }
+        }
 
         // First, the part coming before the name.
         if (style == Section::Summary || style == Section::Accessors) {
@@ -3812,17 +4223,31 @@ void DocBookGenerator::generateSynopsis(const Node *node, const Node *relative,
         } else {
             QString synopsis;
             if (func->isRef())
-                synopsis += QStringLiteral(" &");
+                synopsis += " &"_L1;
             else if (func->isRefRef())
-                synopsis += QStringLiteral(" &&");
+                synopsis += " &&"_L1;
             m_writer->writeCharacters(synopsis);
+
+            if (const auto &req = func->trailingRequiresClause(); req && !req->isEmpty()) {
+                m_writer->writeCharacters(" requires "_L1);
+                generateRequiresClauseText(*req, func->referencedConcepts(), relative);
+            }
         }
     } break;
-    case Node::Enum: {
+    case NodeType::Enum: {
         const auto enume = static_cast<const EnumNode *>(node);
-        m_writer->writeCharacters(QStringLiteral("enum "));
-        m_writer->writeCharacters(namePrefix);
-        generateSynopsisName(node, relative, generateNameLink);
+        if (!enume->isAnonymous()) {
+            m_writer->writeCharacters("enum "_L1);
+            m_writer->writeCharacters(namePrefix);
+            generateSynopsisName(node, relative, generateNameLink);
+        } else if (generateNameLink) {
+            m_writer->writeStartElement(dbNamespace, "emphasis");
+            m_writer->writeAttribute("role", "bold");
+            generateSimpleLink(linkForNode(node, relative), "enum");
+            m_writer->writeEndElement(); // emphasis
+        } else {
+            m_writer->writeCharacters("enum"_L1);
+        }
 
         QString synopsis;
         if (style == Section::Summary) {
@@ -3853,29 +4278,33 @@ void DocBookGenerator::generateSynopsis(const Node *node, const Node *relative,
         }
         m_writer->writeCharacters(synopsis);
     } break;
-    case Node::TypeAlias: {
+    case NodeType::TypeAlias: {
         if (style == Section::Details) {
-            auto templateDecl = node->templateDecl();
-            if (templateDecl)
-                m_writer->writeCharacters((*templateDecl).to_qstring() + QLatin1Char(' '));
+            if (auto templateDecl = node->templateDecl()) {
+                generateTemplateDecl(&*templateDecl, relative);
+                if (templateDecl->visibleParameterCount() > QDoc::MultilineTemplateParamThreshold)
+                    m_writer->writeCharacters("\n"_L1);
+                else
+                    m_writer->writeCharacters(" "_L1);
+            }
         }
         m_writer->writeCharacters(namePrefix);
         generateSynopsisName(node, relative, generateNameLink);
     } break;
-    case Node::Typedef: {
+    case NodeType::Typedef: {
         if (static_cast<const TypedefNode *>(node)->associatedEnum())
             m_writer->writeCharacters("flags ");
         m_writer->writeCharacters(namePrefix);
         generateSynopsisName(node, relative, generateNameLink);
     } break;
-    case Node::Property: {
+    case NodeType::Property: {
         const auto property = static_cast<const PropertyNode *>(node);
         m_writer->writeCharacters(namePrefix);
         generateSynopsisName(node, relative, generateNameLink);
         m_writer->writeCharacters(" : ");
         typified(property->qualifiedDataType(), relative, false, generateType);
     } break;
-    case Node::Variable: {
+    case NodeType::Variable: {
         const auto variable = static_cast<const VariableNode *>(node);
         if (style == Section::AllMembers) {
             generateSynopsisName(node, relative, generateNameLink);
@@ -3902,15 +4331,18 @@ void DocBookGenerator::generateEnumValue(const QString &enumValue, const Node *r
     // must be reversed so that they are processed in the order
     const auto *node = relative->parent();
 
-    if (relative->isQmlProperty()) {
-        const auto *qpn = static_cast<const QmlPropertyNode*>(relative);
-        if (qpn->enumNode() && !enumValue.startsWith("%1."_L1.arg(qpn->enumPrefix()))) {
-            m_writer->writeCharacters("%1.%2"_L1.arg(qpn->enumPrefix(), enumValue));
-            return;
-        }
+    const NativeEnum *nativeEnum{nullptr};
+    if (auto *ne_if = dynamic_cast<const NativeEnumInterface *>(relative))
+        nativeEnum = ne_if->nativeEnum();
+
+    if (nativeEnum && nativeEnum->enumNode() && !enumValue.startsWith("%1."_L1.arg(nativeEnum->prefix()))) {
+        m_writer->writeCharacters("%1.%2"_L1.arg(nativeEnum->prefix(), enumValue));
+        return;
     }
 
-    if (!relative->isEnumType()) {
+    // Respect existing prefixes in \value arguments of \qmlenum topic
+    if (!relative->isEnumType() || (relative->isEnumType(Genus::QML)
+            && enumValue.section(' ', 0, 0).contains('.'_L1))) {
         m_writer->writeCharacters(enumValue);
         return;
     }
@@ -3928,7 +4360,7 @@ void DocBookGenerator::generateEnumValue(const QString &enumValue, const Node *r
     m_writer->writeStartElement(dbNamespace, "code");
     for (auto parent : parents) {
         generateSynopsisName(parent, relative, true);
-        m_writer->writeCharacters("::");
+        m_writer->writeCharacters((relative->genus() == Genus::QML) ? "."_L1 : "::"_L1);
     }
 
     m_writer->writeCharacters(enumValue);
@@ -3936,48 +4368,23 @@ void DocBookGenerator::generateEnumValue(const QString &enumValue, const Node *r
 }
 
 /*!
-  If the node is an overloaded signal, and a node with an
-  example on how to connect to it
-
-  Someone didn't finish writing this comment, and I don't know what this
-  function is supposed to do, so I have not tried to complete the comment
-  yet.
- */
-void DocBookGenerator::generateOverloadedSignal(const Node *node)
-{
-    // From Generator::generateOverloadedSignal.
-    QString code = getOverloadedSignalCode(node);
-    if (code.isEmpty())
-        return;
-
-    m_writer->writeStartElement(dbNamespace, "note");
-    newLine();
-    m_writer->writeStartElement(dbNamespace, "para");
-    m_writer->writeCharacters("Signal ");
-    m_writer->writeTextElement(dbNamespace, "emphasis", node->name());
-    m_writer->writeCharacters(" is overloaded in this class. To connect to this "
-                              "signal by using the function pointer syntax, Qt "
-                              "provides a convenient helper for obtaining the "
-                              "function pointer as shown in this example:");
-    m_writer->writeTextElement(dbNamespace, "code", code);
-    m_writer->writeEndElement(); // para
-    newLine();
-    m_writer->writeEndElement(); // note
-    newLine();
-}
-
-/*!
   Generates an addendum note of type \a type for \a node. \a marker
   is unused in this generator.
 */
 void DocBookGenerator::generateAddendum(const Node *node, Addendum type, CodeMarker *marker,
-                                        bool generateNote)
+                                        AdmonitionPrefix prefix)
 {
     Q_UNUSED(marker)
     Q_ASSERT(node && !node->name().isEmpty());
-    if (generateNote) {
+
+    switch (prefix) {
+    case AdmonitionPrefix::None:
+        break;
+    case AdmonitionPrefix::Note: {
         m_writer->writeStartElement(dbNamespace, "note");
         newLine();
+        break;
+        }
     }
     switch (type) {
     case Invokable:
@@ -4014,14 +4421,37 @@ void DocBookGenerator::generateAddendum(const Node *node, Addendum type, CodeMar
         if (!node->isFunction())
             return;
         const auto *fn = static_cast<const FunctionNode *>(node);
-        auto propertyNodes = fn->associatedProperties();
-        if (propertyNodes.isEmpty())
+        auto nodes = fn->associatedProperties();
+        if (nodes.isEmpty())
             return;
-        std::sort(propertyNodes.begin(), propertyNodes.end(), Node::nodeNameLessThan);
-        for (const auto propertyNode : std::as_const(propertyNodes)) {
+        std::sort(nodes.begin(), nodes.end(), Node::nodeNameLessThan);
+
+        // Group properties by their role for more concise output
+        QMap<PropertyNode::FunctionRole, QList<const PropertyNode *>> roleGroups;
+        for (const auto *n : std::as_const(nodes)) {
+            const auto *pn = static_cast<const PropertyNode *>(n);
+            PropertyNode::FunctionRole role = pn->role(fn);
+            roleGroups[role].append(pn);
+        }
+
+        // Generate text for each role group in an explicit order
+        static constexpr PropertyNode::FunctionRole roleOrder[] = {
+             PropertyNode::FunctionRole::Getter,
+             PropertyNode::FunctionRole::Setter,
+             PropertyNode::FunctionRole::Resetter,
+             PropertyNode::FunctionRole::Notifier,
+             PropertyNode::FunctionRole::Bindable,
+        };
+
+        for (auto role : roleOrder) {
+            const auto it = roleGroups.constFind(role);
+            if (it == roleGroups.cend())
+                continue;
+
+            const auto &properties = it.value();
+
             QString msg;
-            const auto pn = static_cast<const PropertyNode *>(propertyNode);
-            switch (pn->role(fn)) {
+            switch (role) {
             case PropertyNode::FunctionRole::Getter:
                 msg = QStringLiteral("Getter function");
                 break;
@@ -4034,13 +4464,28 @@ void DocBookGenerator::generateAddendum(const Node *node, Addendum type, CodeMar
             case PropertyNode::FunctionRole::Notifier:
                 msg = QStringLiteral("Notifier signal");
                 break;
+            case PropertyNode::FunctionRole::Bindable:
+                msg = QStringLiteral("Bindable function");
+                break;
             default:
                 continue;
             }
+
             m_writer->writeStartElement(dbNamespace, "para");
-            m_writer->writeCharacters(msg + " for property ");
-            generateSimpleLink(linkForNode(pn, nullptr), pn->name());
-            m_writer->writeCharacters(". ");
+            if (properties.size() == 1) {
+                const auto *pn = properties.first();
+                m_writer->writeCharacters(msg + " for property ");
+                generateSimpleLink(linkForNode(pn, nullptr), pn->name());
+                m_writer->writeCharacters(". ");
+            } else {
+                m_writer->writeCharacters(msg + " for properties ");
+                for (qsizetype i = 0; i < properties.size(); ++i) {
+                    const auto *pn = properties.at(i);
+                    generateSimpleLink(linkForNode(pn, nullptr), pn->name());
+                    m_writer->writeCharacters(TextUtils::separator(i, properties.size()));
+                }
+                m_writer->writeCharacters(" ");
+            }
             m_writer->writeEndElement(); // para
             newLine();
         }
@@ -4059,11 +4504,98 @@ void DocBookGenerator::generateAddendum(const Node *node, Addendum type, CodeMar
         newLine();
         break;
     }
+    case OverloadNote: {
+        const auto *func = static_cast<const FunctionNode *>(node);
+
+        // Primary overloads should not display any overload note text
+        if (func->isPrimaryOverload())
+            return;
+
+        m_writer->writeStartElement(dbNamespace, "para");
+
+        if (func->isSignal() || func->isSlot()) {
+            auto writeDocBookLink = [&](const QString &target, const QString &label) {
+                const Node *linkNode = nullptr;
+                const Atom &linkAtom = Atom(Atom::AutoLink, target);
+                const QString &link = getAutoLink(&linkAtom, node, &linkNode);
+
+                m_writer->writeStartElement(dbNamespace, "link");
+                if (!link.isEmpty() && linkNode) {
+                    m_writer->writeAttribute(xlinkNamespace, "href", link);
+                } else {
+                    m_writer->writeAttribute(dbNamespace, "linkend", target);
+                }
+                m_writer->writeCharacters(label);
+                m_writer->writeEndElement(); // link
+            };
+
+            const QString &functionType = func->isSignal() ? "signal" : "slot";
+            const QString &configKey = func->isSignal() ? "overloadedsignalstarget" : "overloadedslotstarget";
+            const QString &defaultTarget = func->isSignal() ? "connecting-overloaded-signals" : "connecting-overloaded-slots";
+            const QString &linkTarget = Config::instance().get(configKey).asString(defaultTarget);
+
+            m_writer->writeCharacters("This " + functionType + " is overloaded. ");
+
+            QString snippet = generateOverloadSnippet(func);
+            if (!snippet.isEmpty()) {
+                m_writer->writeCharacters("To connect to this " + functionType + ":");
+                m_writer->writeEndElement(); // para
+                newLine();
+                m_writer->writeStartElement(dbNamespace, "programlisting");
+                m_writer->writeCharacters(snippet);
+                m_writer->writeEndElement(); // programlisting
+                newLine();
+                // A new para element is needed here because the caller closes it.
+                // When linkTarget is empty, this creates an empty para, which is
+                // harmless but slightly verbose.
+                m_writer->writeStartElement(dbNamespace, "para");
+                if (!linkTarget.isEmpty()) {
+                    m_writer->writeCharacters("For more examples and approaches, see ");
+                    writeDocBookLink(linkTarget, "connecting to overloaded " + functionType + "s");
+                    m_writer->writeCharacters(".");
+                }
+            } else if (!linkTarget.isEmpty()) {
+                m_writer->writeCharacters("For more examples and approaches, see ");
+                writeDocBookLink(linkTarget, "connecting to overloaded " + functionType + "s");
+                m_writer->writeCharacters(".");
+            }
+        } else {
+            // Original behavior for regular overloaded functions
+            const auto &args = node->doc().overloadList();
+            if (args.first().first.isEmpty()) {
+                m_writer->writeCharacters("This is an overloaded function.");
+            } else {
+                QString target = args.first().first;
+                // If the target is not fully qualified and we have a parent class context,
+                // attempt to qualify it to improve link resolution
+                if (!target.contains("::")) {
+                    const auto *parent = node->parent();
+                    if (parent && (parent->isClassNode() || parent->isNamespace())) {
+                        target = parent->name() + "::" + target;
+                    }
+                }
+                m_writer->writeCharacters("This function overloads ");
+                // Use the same approach as AutoLink resolution in other generators
+                const Node *linkNode = nullptr;
+                Atom linkAtom = Atom(Atom::AutoLink, target);
+                QString link = getAutoLink(&linkAtom, node, &linkNode);
+                if (!link.isEmpty() && linkNode)
+                    generateSimpleLink(link, target);
+                else
+                    m_writer->writeCharacters(target);
+                m_writer->writeCharacters(".");
+            }
+        }
+
+        m_writer->writeEndElement(); // para
+        newLine();
+        break;
+    }
     default:
         break;
     }
 
-    if (generateNote) {
+    if (prefix == AdmonitionPrefix::Note) {
         m_writer->writeEndElement(); // note
         newLine();
     }
@@ -4102,7 +4634,7 @@ void DocBookGenerator::generateDetailedMember(const Node *node, const PageNode *
         }
     } else {
         const EnumNode *etn;
-        if (node->isEnumType() && (etn = static_cast<const EnumNode *>(node))->flagsType()) {
+        if (node->isEnumType(Genus::CPP) && (etn = static_cast<const EnumNode *>(node))->flagsType()) {
             startSectionBegin(node);
             if (m_useITS)
                 m_writer->writeAttribute(itsNamespace, "translate", "no");
@@ -4135,7 +4667,11 @@ void DocBookGenerator::generateDetailedMember(const Node *node, const PageNode *
         startSection("", "Notes");
     }
 
-    generateOverloadedSignal(node);
+    if (node->isFunction()) {
+        const auto *func = static_cast<const FunctionNode *>(node);
+        if (func->hasOverloads() && (func->isSignal() || func->isSlot()))
+            generateAddendum(node, OverloadNote, nullptr, AdmonitionPrefix::Note);
+    }
     generateComparisonCategory(node);
     generateThreadSafeness(node);
     generateSince(node);
@@ -4180,7 +4716,7 @@ void DocBookGenerator::generateDetailedMember(const Node *node, const PageNode *
                 generateSectionList(notifiers, node);
             }
         }
-    } else if (node->isEnumType()) {
+    } else if (node->isEnumType(Genus::CPP)) {
         const auto en = static_cast<const EnumNode *>(node);
 
         if (m_qflagsHref.isEmpty()) {
@@ -4268,9 +4804,9 @@ void DocBookGenerator::generateSectionList(const Section &section, const Node *r
         newLine();
 
         if (hasPrivateSignals)
-            generateAddendum(relative, Generator::PrivateSignal, nullptr, true);
+            generateAddendum(relative, Generator::PrivateSignal, nullptr, AdmonitionPrefix::Note);
         if (isInvokable)
-            generateAddendum(relative, Generator::Invokable, nullptr, true);
+            generateAddendum(relative, Generator::Invokable, nullptr, AdmonitionPrefix::Note);
     }
 
     if (!useObsoleteMembers && section.style() == Section::Summary
@@ -4290,7 +4826,7 @@ void DocBookGenerator::generateSectionList(const Section &section, const Node *r
 void DocBookGenerator::generateSectionInheritedList(const Section &section, const Node *relative)
 {
     // From HtmlGenerator::generateSectionInheritedList.
-    QList<std::pair<Aggregate *, int>>::ConstIterator p = section.inheritedMembers().constBegin();
+    QList<std::pair<const Aggregate *, int>>::ConstIterator p = section.inheritedMembers().constBegin();
     while (p != section.inheritedMembers().constEnd()) {
         m_writer->writeStartElement(dbNamespace, "listitem");
         m_writer->writeCharacters(QString::number((*p).second) + u' ');
@@ -4316,7 +4852,7 @@ void DocBookGenerator::generatePageNode(PageNode *pn)
     Q_ASSERT(m_writer == nullptr);
     m_writer = startDocument(pn);
 
-    generateHeader(pn->fullTitle(), pn->subtitle(), pn);
+    generateHeader(pn->doc().title(), pn->subtitle(), pn);
     generateBody(pn);
     generateAlsoList(pn);
     generateFooter();
@@ -4335,11 +4871,16 @@ void DocBookGenerator::generateQmlTypePage(QmlTypeNode *qcn)
     m_writer = startDocument(qcn);
 
     Generator::setQmlTypeContext(qcn);
-    QString title = qcn->fullTitle();
+    QString title = qcn->name();
     if (qcn->isQmlBasicType())
         title.append(" QML Value Type");
     else
         title.append(" QML Type");
+
+    if (qcn->isSingleton())
+        title.append(" (Singleton)");
+    else if (qcn->isUncreatable())
+        title.append(" (Uncreatable)");
     // TODO: for ITS attribute, only apply translate="no" on qcn->fullTitle(),
     // not its suffix (which should be translated). generateHeader doesn't
     // allow this kind of input, the title isn't supposed to be structured.
@@ -4349,6 +4890,23 @@ void DocBookGenerator::generateQmlTypePage(QmlTypeNode *qcn)
     generateQmlRequisites(qcn);
     generateStatus(qcn);
 
+    if (qcn->isSingleton() || qcn->isUncreatable()) {
+        m_writer->writeStartElement(dbNamespace, "note");
+        m_writer->writeStartElement(dbNamespace, "para");
+        m_writer->writeStartElement(dbNamespace, "emphasis");
+        m_writer->writeAttribute("role", "bold");
+        m_writer->writeCharacters("Note: ");
+        m_writer->writeEndElement(); // emphasis
+        if (qcn->isSingleton())
+            m_writer->writeCharacters("This type is a QML singleton. "
+                                      "There is only one instance of this type in the QML engine.");
+        else
+            m_writer->writeCharacters("This is an uncreatable type. "
+                                      "It cannot be instantiated in QML.");
+        m_writer->writeEndElement(); // para
+        m_writer->writeEndElement(); // note
+    }
+
     startSection("details", "Detailed Description");
     generateBody(qcn);
 
@@ -4357,7 +4915,7 @@ void DocBookGenerator::generateQmlTypePage(QmlTypeNode *qcn)
     endSection();
 
     Sections sections(qcn);
-    for (const auto &section : sections.stdQmlTypeDetailsSections()) {
+    for (const auto &section : sections.detailsSections()) {
         if (!section.isEmpty()) {
             startSection(section.title().toLower(), section.title());
 
@@ -4441,7 +4999,7 @@ void DocBookGenerator::generateDetailedQmlMember(Node *node, const Aggregate *re
         int i = 0;
         for (const auto &sharedNode : sharedNodes) {
             // Ignore this element if there is nothing to generate.
-            if (!sharedNode->isFunction(Node::QML) && !sharedNode->isQmlProperty()) {
+            if (!sharedNode->isFunction(Genus::QML) && !sharedNode->isQmlProperty()) {
                 continue;
             }
 
@@ -4454,7 +5012,7 @@ void DocBookGenerator::generateDetailedQmlMember(Node *node, const Aggregate *re
             }
 
             // Write the title.
-            if (sharedNode->isFunction(Node::QML))
+            if (sharedNode->isFunction(Genus::QML))
                 generateQmlMethodTitle(sharedNode);
             else if (sharedNode->isQmlProperty())
                 m_writer->writeCharacters(
@@ -4473,7 +5031,7 @@ void DocBookGenerator::generateDetailedQmlMember(Node *node, const Aggregate *re
         if (i == 0) {
             startSectionBegin(refForNode(node));
 
-            if (node->isFunction(Node::QML))
+            if (node->isFunction(Genus::QML))
                 generateQmlMethodTitle(node);
             else if (node->isQmlProperty())
                 m_writer->writeCharacters(
@@ -4481,6 +5039,10 @@ void DocBookGenerator::generateDetailedQmlMember(Node *node, const Aggregate *re
 
             startSectionEnd();
         }
+    } else if (node->isEnumType(Genus::QML)) {
+        startSectionBegin(node);
+        generateDocBookSynopsis(node);
+        startSectionEnd();
     } else { // assume the node is a method/signal handler
         startSectionBegin(node);
         generateQmlMethodTitle(node);
@@ -4509,7 +5071,9 @@ void DocBookGenerator::generateDocumentation(Node *node)
         return;
     if (node->isIndexNode())
         return;
-    if (node->isInternal() && !m_showInternal)
+    const InclusionPolicy policy = Config::instance().createInclusionPolicy();
+    const NodeContext context = node->createContext();
+    if (!InclusionFilter::isIncluded(policy, context))
         return;
     if (node->isExternalPage())
         return;
@@ -4562,7 +5126,7 @@ void DocBookGenerator::generateDocumentation(Node *node)
     if (node->isAggregate()) {
         auto *aggregate = static_cast<Aggregate *>(node);
         for (auto c : aggregate->childNodes()) {
-            if (node->isPageNode() && !node->isPrivate())
+            if (node->isPageNode())
                 generateDocumentation(c);
         }
     }
@@ -4593,9 +5157,9 @@ void DocBookGenerator::generateProxyPage(Aggregate *aggregate)
     }
 
     Sections sections(aggregate);
-    SectionVector *detailsSections = &sections.stdDetailsSections();
+    const SectionVector &detailsSections = sections.detailsSections();
 
-    for (const auto &section : std::as_const(*detailsSections)) {
+    for (const auto &section : detailsSections) {
         if (section.isEmpty())
             continue;
 
@@ -4603,17 +5167,15 @@ void DocBookGenerator::generateProxyPage(Aggregate *aggregate)
 
         const QList<Node *> &members = section.members();
         for (const auto &member : members) {
-            if (!member->isPrivate()) { // ### check necessary?
-                if (!member->isClassNode()) {
-                    generateDetailedMember(member, aggregate);
-                } else {
-                    startSectionBegin();
-                    generateFullName(member, aggregate);
-                    startSectionEnd();
+            if (!member->isClassNode()) {
+                generateDetailedMember(member, aggregate);
+            } else {
+                startSectionBegin();
+                generateFullName(member, aggregate);
+                startSectionEnd();
 
-                    generateBrief(member);
-                    endSection();
-                }
+                generateBrief(member);
+                endSection();
             }
         }
 
@@ -4636,13 +5198,13 @@ void DocBookGenerator::generateCollectionNode(CollectionNode *cn)
     m_writer = startDocument(cn);
 
     // Info container.
-    generateHeader(cn->fullTitle(), cn->subtitle(), cn);
+    generateHeader(cn->doc().title(), cn->subtitle(), cn);
 
     // Element synopsis.
     generateDocBookSynopsis(cn);
 
     // Generate brief for C++ modules, status for all modules.
-    if (cn->genus() != Node::DOC && cn->genus() != Node::DontCare) {
+    if (cn->genus() != Genus::DOC && cn->genus() != Genus::DontCare) {
         if (cn->isModule())
             generateBrief(cn);
         generateStatus(cn);
@@ -4652,7 +5214,7 @@ void DocBookGenerator::generateCollectionNode(CollectionNode *cn)
     // Actual content.
     if (cn->isModule()) {
         if (!cn->noAutoList()) {
-            NodeMap nmm{cn->getMembers(Node::Namespace)};
+            NodeMap nmm{cn->getMembers(NodeType::Namespace)};
             if (!nmm.isEmpty()) {
                 startSection("namespaces", "Namespaces");
                 generateAnnotatedList(cn, nmm.values(), "namespaces");

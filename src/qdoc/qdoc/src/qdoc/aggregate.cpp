@@ -3,7 +3,10 @@
 
 #include "aggregate.h"
 
+#include "config.h"
 #include "functionnode.h"
+#include "inclusionfilter.h"
+#include "inclusionpolicy.h"
 #include "parameters.h"
 #include "typedefnode.h"
 #include "qdocdatabase.h"
@@ -71,16 +74,18 @@ Aggregate::~Aggregate()
   find all this node's children that have the given \a name,
   and return the one that satisfies the \a genus requirement.
  */
-Node *Aggregate::findChildNode(const QString &name, Node::Genus genus, int findFlags) const
+Node *Aggregate::findChildNode(const QString &name, Genus genus, int findFlags) const
 {
-    if (genus == Node::DontCare) {
+    if (genus == Genus::DontCare) {
         Node *node = m_nonfunctionMap.value(name);
         if (node)
             return node;
     } else {
         const NodeList &nodes = m_nonfunctionMap.values(name);
         for (auto *node : nodes) {
-            if (genus & node->genus()) {
+            if (node->isInternal())
+                continue;
+            if (hasCommonGenusType(genus, node->genus())) {
                 if (findFlags & TypesOnly) {
                     if (!node->isTypedef() && !node->isClassNode()
                         && !node->isQmlType() && !node->isEnumType())
@@ -91,7 +96,10 @@ Node *Aggregate::findChildNode(const QString &name, Node::Genus genus, int findF
             }
         }
     }
-    if (genus != Node::DontCare && !(genus & this->genus()))
+    if (genus != Genus::DontCare && !(hasCommonGenusType(genus, this->genus())))
+        return nullptr;
+
+    if (findFlags & TypesOnly)
         return nullptr;
 
     auto it = m_functionMap.find(name);
@@ -148,6 +156,45 @@ FunctionNode *Aggregate::findFunctionChild(const QString &name, const Parameters
     if (map_it == m_functionMap.end())
         return nullptr;
 
+    // If parameters is empty (e.g., from \overload command), don't try exact matching.
+    // Instead, find the best available function based on isPrimaryOverload flag.
+    if (parameters.isEmpty()) {
+        FunctionNode *fallback = nullptr;
+        FunctionNode *lastResort = nullptr;
+        FunctionNode *deletedFallback = nullptr;
+
+        for (auto *fn : *map_it) {
+            // Primary overload takes highest priority - return immediately
+            if (fn->isPrimaryOverload() && !fn->isInternal())
+                return fn;
+
+            // Remember first non-deprecated, non-internal, non-deleted as fallback.
+            // Deleted functions shouldn't be primary link targets - users linking
+            // to ClassName() want a usable constructor, not a deleted copy ctor.
+            if (!fallback && !fn->isInternal() && !fn->isDeprecated()
+                    && !fn->isDeletedAsWritten())
+                fallback = fn;
+
+            // Remember first non-internal, non-deleted as last resort
+            if (!lastResort && !fn->isInternal() && !fn->isDeletedAsWritten())
+                lastResort = fn;
+
+            // Deleted functions are valid link targets when no other option exists
+            if (!deletedFallback && !fn->isInternal())
+                deletedFallback = fn;
+        }
+
+        if (fallback)
+            return fallback;
+
+        if (lastResort)
+            return lastResort;
+
+        // Fall back to deleted functions when they're the only option
+        return deletedFallback;
+    }
+
+    // Try exact parameter match
     auto match_it = std::find_if((*map_it).begin(), (*map_it).end(),
         [&parameters](const FunctionNode *fn) {
             if (fn->isInternal())
@@ -160,13 +207,7 @@ FunctionNode *Aggregate::findFunctionChild(const QString &name, const Parameters
             return true;
         });
 
-    if (match_it != (*map_it).end())
-        return *match_it;
-
-    // Assumes that overloads are already normalized; i.e, if there's
-    // an active function, it'll be found at the start of the list.
-    auto *fn = (*(*map_it).begin());
-    return (parameters.isEmpty() && !fn->isInternal()) ? fn : nullptr;
+    return (match_it != (*map_it).end()) ? *match_it : nullptr;
 }
 
 /*!
@@ -190,10 +231,80 @@ FunctionNode *Aggregate::findFunctionChild(const FunctionNode *clone)
     return func_it != (*funcs_it).end() ? *func_it : nullptr;
 }
 
+
+/*!
+    \internal
+    Warn about documented, non-private children under undocumented parents, unless:
+
+    \list
+    \li The \a child's parent() doesn't match \a aggregate (indicating a related
+        non-member), to avoid duplicate warnings as the node appears under multiple
+        aggregates.
+    \li The child is private (private members don't generate output).
+    \li The child has \c Internal or \c InternalAuto status (we check the child's
+        own status, not inherited internal status from the parent).
+    \li The parent is a proxy node (automatically generated, no documentation).
+    \li The parent is a namespace node (handled separately by
+        NamespaceNode::reportDocumentedChildrenInUndocumentedNamespace()).
+    \li The parent is marked with the \c{\\dontdocument} command.
+    \li The child is marked with the \c{\\dontdocument} command.
+    \li The child has auto-generated documentation. These docs are created by QDoc,
+        not written by a human, so warning about them would be confusing.
+    \li The \c{-showinternal} command-line option is set (internal nodes generate
+        output, so the warning is not needed).
+    \li The \c{-no-linkerrors} command-line option is set (avoids false positives
+        when the aggregate is documented outside the current project).
+    \li The file path of the child declaration matches \e internalfilepatterns.
+    \endlist
+
+    \note We check \c{child->status()} directly rather than \c{child->isInternal()}
+    because \c{isInternal()} also considers the parent's status. Since the parent
+    is undocumented (and thus marked InternalAuto), \c{isInternal()} would incorrectly
+    return true for all children, suppressing the warning entirely.
+
+    \sa NamespaceNode::reportDocumentedChildrenInUndocumentedNamespace()
+*/
+static void warnAboutDocumentedChildInUndocumentedParent(const Node *aggregate, const Node *child)
+{
+    Q_ASSERT(child);
+    const auto *parent{child->parent()};
+    if (parent && parent == aggregate && !child->isPrivate()
+            && child->status() != Status::Internal && child->status() != Status::InternalAuto
+            && !parent->isProxyNode() && !parent->isNamespace() && !parent->isDontDocument()
+            && !parent->hasDoc()) {
+
+        if (child->isDontDocument())
+            return;
+
+        if (child->doc().isAutoGenerated())
+            return;
+
+        auto &config = Config::instance();
+
+        if (InclusionFilter::processInternalDocs(config.createInclusionPolicy()))
+            return;
+
+        if (config.get(CONFIG_NOLINKERRORS).asBool())
+            return;
+
+        if (child->genus() == Genus::CPP && !child->declLocation().isEmpty()) {
+            if (Config::matchesInternalFilePattern(
+                    child->declLocation().filePath(),
+                    config.getInternalFilePatternsCompiled()))
+            return;
+        }
+
+        child->doc().location().warning(
+                "No output generated for %1 '%2' because '%3' is undocumented"_L1
+                    .arg(child->nodeTypeString(),
+                         child->plainFullName(),
+                         child->parent()->name()));
+    }
+}
+
 /*!
   Mark all child nodes that have no documentation as having
-  private access and internal status. qdoc will then ignore
-  them for documentation purposes.
+  internal status. QDoc will then ignore them for documentation purposes.
  */
 void Aggregate::markUndocumentedChildrenInternal()
 {
@@ -203,13 +314,14 @@ void Aggregate::markUndocumentedChildrenInternal()
                 if (child->isFunction()) {
                     if (static_cast<FunctionNode *>(child)->hasAssociatedProperties())
                         continue;
-                } else if (child->isTypedef()) {
+                } else if (child->isTypedef() && child->isInAPI()) {
                     if (static_cast<TypedefNode *>(child)->hasAssociatedEnum())
                         continue;
                 }
-                child->setAccess(Access::Private);
-                child->setStatus(Node::Internal);
+                child->setStatus(Status::InternalAuto);
             }
+        } else {
+            warnAboutDocumentedChildInUndocumentedParent(this, child);
         }
         if (child->isAggregate()) {
             static_cast<Aggregate *>(child)->markUndocumentedChildrenInternal();
@@ -219,35 +331,54 @@ void Aggregate::markUndocumentedChildrenInternal()
 
 /*!
     Adopts each non-aggregate C++ node (function/macro, typedef, enum, variable,
-    or a shared comment node with genus Node::CPP) in the global scope to the
-    aggregate specified in the node's documentation using the \\relates command.
+    or a shared comment node with genus Node::CPP) to the aggregate specified in
+    the node's documentation using the \\relates command.
 
     If the target Aggregate is not found in the primary tree, creates a new
-    ProxyNode to use as the parent.
+    ProxyNode to use as the parent. If the target Aggregate is not found at all,
+    reports it.
 */
 void Aggregate::resolveRelates()
 {
-    Q_ASSERT(name().isEmpty()); // Must be called on the root namespace
     auto *database = QDocDatabase::qdocDB();
 
-    for (auto *node : m_children) {
-        if (node->isRelatedNonmember() || node->isAggregate())
-            continue;
-        if (node->genus() != Node::CPP)
-            continue;
-
-        const auto &relates_args = node->doc().metaCommandArgs("relates"_L1);
-        if (relates_args.isEmpty())
-            continue;
-
-        auto *aggregate = database->findRelatesNode(relates_args[0].first.split("::"_L1));
-        if (!aggregate)
-            aggregate = new ProxyNode(this, relates_args[0].first);
-        else if (node->parent() == aggregate)
+    // An unresolved \relates target makes this loop create a ProxyNode parented
+    // to this aggregate. Node's constructor adds it to \c{m_children}, mutating
+    // the very list being iterated. Iterate over a \c{const} copy instead, as
+    // the new ProxyNode doesn't need relates resolution itself.
+    const NodeList children = m_children;
+    for (auto *node : children) {
+        if (node->genus() != Genus::CPP)
             continue;
 
-        aggregate->adoptChild(node);
-        node->setRelatedNonmember(true);
+        if (!node->isAggregate()) {
+            const auto &relates_args = node->doc().metaCommandArgs("relates"_L1);
+            if (relates_args.isEmpty())
+                continue;
+            // Hidden friends are marked as related non-members during
+            // initial parsing (they belong to their enclosing class).
+            // An explicit \relates directive should still relocate them
+            // when the function participates in a different class's
+            // protocol (e.g. qHashEquals as a QHash customization point).
+            // Skip only if already adopted by a different \relates target.
+            if (node->isRelatedNonmember() && node->parent() != this)
+                continue;
+
+            auto *aggregate = database->findRelatesNode(relates_args[0].first.split("::"_L1));
+            if (!aggregate)
+                Location().report("Failed to find \\relates target '%1' for %2"_L1
+                        .arg(relates_args[0].first, node->fullName()));
+
+            if (!aggregate || aggregate->isIndexNode())
+                aggregate = new ProxyNode(this, relates_args[0].first);
+            else if (node->parent() == aggregate)
+                continue;
+
+            aggregate->adoptChild(node);
+            node->setRelatedNonmember(true);
+        } else {
+            static_cast<Aggregate*>(node)->resolveRelates();
+        }
     }
 }
 
@@ -258,18 +389,47 @@ void Aggregate::resolveRelates()
   For sorting, active functions take precedence over internal ones, as well
   as ones marked as \\overload - the latter ones typically do not contain
   full documentation, so selecting them as the \e primary function
-  would cause unnecessary warnings to be generated.
+  would cause unnecessary warnings to be generated. However, functions
+  explicitly marked with \\overload primary take precedence over other
+  overloads and will be selected as the primary function.
 
   Otherwise, the order is set as determined by FunctionNode::compare().
  */
 void Aggregate::normalizeOverloads()
 {
-    for (auto map_it = m_functionMap.begin(); map_it != m_functionMap.end(); ++map_it) {
-        if ((*map_it).size() > 1) {
-            std::sort((*map_it).begin(), (*map_it).end(),
+    for (auto &map_it : m_functionMap) {
+        if (map_it.size() == 1) {
+            map_it.front()->setOverloadNumber(0);
+        } else if (map_it.size() > 1) {
+            // Check for multiple primary overloads before sorting
+            std::vector<const FunctionNode*> primaryOverloads;
+            for (const auto *fn : map_it) {
+                if (!fn->isPrimaryOverload())
+                    continue;
+
+                // Check if we already have a primary from a different location
+                const auto *currentLocation = &(fn->doc().location());
+                for (const auto *existingPrimary : primaryOverloads) {
+                    const auto *existingLocation = &(existingPrimary->doc().location());
+
+                    if (*currentLocation != *existingLocation) {
+                        fn->doc().location().warning(
+                            "Multiple primary overloads for '%1'. The previous primary is here: %2"_L1
+                                .arg(fn->name(), existingPrimary->doc().location().toString()));
+                        break;
+                    }
+                }
+
+                primaryOverloads.push_back(fn);
+            }
+
+            std::sort(map_it.begin(), map_it.end(),
                 [](const FunctionNode *f1, const FunctionNode *f2) -> bool {
                     if (f1->isInternal() != f2->isInternal())
                         return f2->isInternal();
+                    // Prioritize functions marked with \overload primary
+                    if (f1->isPrimaryOverload() != f2->isPrimaryOverload())
+                        return f1->isPrimaryOverload();
                     if (f1->isOverload() != f2->isOverload())
                         return f2->isOverload();
                     // Prioritize documented over undocumented
@@ -277,10 +437,16 @@ void Aggregate::normalizeOverloads()
                         return f1->hasDoc();
                     return (compare(f1, f2) < 0);
             });
-            // Set overload numbers
+            // Set overload numbers only if the functions are documented.
+            // They are not visible if undocumented.
+            // Only set overload numbers within the context of the parent, to
+            // avoid renumbering from occurring if the function has been
+            // adopted by multiple parents.
             signed short n{0};
-            for (auto *fn : (*map_it))
-                fn->setOverloadNumber(n++);
+            for (auto *fn : map_it) {
+                if (fn->hasDoc() && fn->parent() == this)
+                    fn->setOverloadNumber(n++);
+            }
         }
     }
 
@@ -292,15 +458,27 @@ void Aggregate::normalizeOverloads()
 
 /*!
   Returns a const reference to the list of child nodes of this
-  aggregate that are not function nodes. Duplicate nodes are
-  removed from the list.
+  aggregate that are not function nodes. The list is sorted using
+  \l Node::nodeLessThan().
+
+  \warning Only call this function after the node tree is fully
+  constructed (all parsing is done).
  */
 const NodeList &Aggregate::nonfunctionList()
 {
-    m_nonfunctionList = m_nonfunctionMap.values();
-    std::sort(m_nonfunctionList.begin(), m_nonfunctionList.end(), Node::nodeNameLessThan);
-    m_nonfunctionList.erase(std::unique(m_nonfunctionList.begin(), m_nonfunctionList.end()),
-                            m_nonfunctionList.end());
+    if (!m_nonfunctionList.isEmpty())
+        return m_nonfunctionList;
+
+    m_nonfunctionList = m_children;
+    // Erase functions
+    m_nonfunctionList.erase(
+        std::remove_if(m_nonfunctionList.begin(), m_nonfunctionList.end(),
+            [](const Node* node) {
+                return node->isFunction();
+            }),
+        m_nonfunctionList.end());
+    // Sort based on node properties
+    std::sort(m_nonfunctionList.begin(), m_nonfunctionList.end(), Node::nodeLessThan);
     return m_nonfunctionList;
 }
 
@@ -399,32 +577,20 @@ void Aggregate::adoptChild(Node *child)
 }
 
 /*!
-  If this node has a child that is a QML property named \a n, return a
-  pointer to that child. Otherwise, return \nullptr.
- */
-QmlPropertyNode *Aggregate::hasQmlProperty(const QString &n) const
-{
-    NodeType goal = Node::QmlProperty;
-    for (auto *child : std::as_const(m_children)) {
-        if (child->nodeType() == goal) {
-            if (child->name() == n)
-                return static_cast<QmlPropertyNode *>(child);
-        }
-    }
-    return nullptr;
-}
-
-/*!
   If this node has a child that is a QML property named \a n and that
   also matches \a attached, return a pointer to that child.
  */
-QmlPropertyNode *Aggregate::hasQmlProperty(const QString &n, bool attached) const
+QmlPropertyNode *Aggregate::hasQmlProperty(const QString &n, PropertySearchType attached) const
 {
-    NodeType goal = Node::QmlProperty;
+    NodeType goal = NodeType::QmlProperty;
     for (auto *child : std::as_const(m_children)) {
         if (child->nodeType() == goal) {
-            if (child->name() == n && child->isAttached() == attached)
-                return static_cast<QmlPropertyNode *>(child);
+            if (child->name() == n) {
+                if (attached == AnyProperties
+                    || (child->isAttached() && attached == AttachedProperties)
+                    || (!child->isAttached() && attached == UnattachedProperties))
+                    return static_cast<QmlPropertyNode *>(child);
+            }
         }
     }
     return nullptr;
@@ -639,6 +805,9 @@ void Aggregate::findAllSince()
             } else if (node->isQmlProperty()) {
                 // Insert QML properties into the since map.
                 nsmap.insert(node->name(), node);
+            } else if (node->isConcept()) {
+                // Insert concepts with a qualified name
+                nsmap.insert(node->qualifyWithParentName(), node);
             } else {
                 // Insert external documents into the general since map.
                 QString name = node->qualifyWithParentName();
@@ -679,34 +848,44 @@ void Aggregate::resolveQmlInheritance()
             continue;
         static_cast<QmlTypeNode *>(child)->resolveInheritance(previousSearches);
     }
+
+    // At this point we check for cycles in the inheritance of QML types.
+    for (auto *child : std::as_const(m_children)) {
+        if (child->isQmlType())
+            static_cast<QmlTypeNode *>(child)->checkInheritance();
+    }
 }
 
 /*!
   Returns a word representing the kind of Aggregate this node is.
-  Currently only works for class, struct, and union, but it can
-  easily be extended. If \a cap is true, the word is capitalised.
+  Currently recognizes class, struct, union, and namespace.
+  If \a cap is true, the word is capitalised.
  */
 QString Aggregate::typeWord(bool cap) const
 {
     if (cap) {
         switch (nodeType()) {
-        case Node::Class:
-            return QLatin1String("Class");
-        case Node::Struct:
-            return QLatin1String("Struct");
-        case Node::Union:
-            return QLatin1String("Union");
+        case NodeType::Class:
+            return "Class"_L1;
+        case NodeType::Struct:
+            return "Struct"_L1;
+        case NodeType::Union:
+            return "Union"_L1;
+        case NodeType::Namespace:
+            return "Namespace"_L1;
         default:
             break;
         }
     } else {
         switch (nodeType()) {
-        case Node::Class:
-            return QLatin1String("class");
-        case Node::Struct:
-            return QLatin1String("struct");
-        case Node::Union:
-            return QLatin1String("union");
+        case NodeType::Class:
+            return "class"_L1;
+        case NodeType::Struct:
+            return "struct"_L1;
+        case NodeType::Union:
+            return "union"_L1;
+        case NodeType::Namespace:
+            return "namespace"_L1;
         default:
             break;
         }

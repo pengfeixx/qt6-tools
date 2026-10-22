@@ -359,7 +359,7 @@ static const char *docs[] = {
 static QStringList newQtDocumentation()
 {
     QStringList result;
-    const QDir docDirectory(QLibraryInfo::path(QLibraryInfo::DocumentationPath));
+    const QDir docDirectory(QLibraryInfo::paths(QLibraryInfo::DocumentationPath).value(0));
     const QFileInfoList entries = docDirectory.entryInfoList(QStringList(QStringLiteral("*.qch")),
                                                              QDir::Files, QDir::Name);
     if (!entries.isEmpty()) {
@@ -452,7 +452,7 @@ void MainWindow::setupActions()
 {
     TRACE_OBJ
     QString resourcePath = ":/qt-project.org/assistant/images/"_L1;
-#ifdef Q_OS_MAC
+#ifdef Q_OS_MACOS
     setUnifiedTitleAndToolBarOnMac(true);
     resourcePath.append("mac"_L1);
 #else
@@ -562,7 +562,7 @@ void MainWindow::setupActions()
         << QKeySequence(Qt::CTRL | Qt::Key_PageUp));
 
     const Qt::Modifier modifier =
-#ifdef Q_OS_MAC
+#ifdef Q_OS_MACOS
             Qt::ALT;
 #else
             Qt::CTRL;
@@ -582,7 +582,7 @@ void MainWindow::setupActions()
             this, &MainWindow::showAboutDialog);
     m_aboutAction->setMenuRole(QAction::AboutRole);
 
-#if defined(Q_OS_UNIX) && !defined(Q_OS_MAC)
+#if defined(Q_OS_UNIX) && !defined(Q_OS_APPLE)
     m_resetZoomAction->setIcon(QIcon::fromTheme("zoom-original"_L1, m_resetZoomAction->icon()));
     m_syncAction->setIcon(QIcon::fromTheme(QIcon::ThemeIcon::ViewRefresh,
                           m_syncAction->icon()));
@@ -605,7 +605,7 @@ void MainWindow::setupActions()
     navigationBar->addAction(globalActions->zoomOutAction());
     navigationBar->addAction(m_resetZoomAction);
 
-#if defined(Q_OS_MAC)
+#if defined(Q_OS_MACOS)
     QMenu *windowMenu = new QMenu(tr("&Window"), this);
     menuBar()->insertMenu(menu->menuAction(), windowMenu);
     windowMenu->addAction(tr("Zoom"),
@@ -767,7 +767,7 @@ void MainWindow::showNewAddress(const QUrl &url)
 void MainWindow::gotoAddress()
 {
     TRACE_OBJ
-    m_centralWidget->setSource(m_addressLineEdit->text());
+    m_centralWidget->setSource(QUrl(m_addressLineEdit->text()));
 }
 
 void MainWindow::showTopicChooser(const QList<QHelpLink> &documents,
@@ -1137,7 +1137,7 @@ void MainWindow::registerDocumentation(const QString &component,
     if (!helpEngine.registerDocumentation(absFileName)) {
         QMessageBox::warning(this, tr("Qt Assistant"),
             tr("Could not register file '%1': %2").
-            arg(absFileName).arg(helpEngine.error()));
+            arg(absFileName, helpEngine.error()));
     } else {
         QStringList docInfo;
         docInfo << QFileInfo(absFileName).lastModified().toString(Qt::ISODate)

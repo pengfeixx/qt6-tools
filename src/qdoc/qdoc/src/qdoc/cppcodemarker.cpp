@@ -6,9 +6,11 @@
 #include "access.h"
 #include "enumnode.h"
 #include "functionnode.h"
+#include "genustypes.h"
 #include "namespacenode.h"
 #include "propertynode.h"
 #include "qmlpropertynode.h"
+#include "template_declaration.h"
 #include "text.h"
 #include "tree.h"
 #include "typedefnode.h"
@@ -20,6 +22,234 @@
 QT_BEGIN_NAMESPACE
 
 using namespace Qt::StringLiterals;
+
+/*!
+    \internal
+
+    Wraps occurrences of each name in \a concepts inside \a text with
+    \c{<@concept target="FULLY::QUALIFIED">unqualified</@concept>}
+    markers so the HTML generator can resolve them to anchors pointing
+    at the documented concept's reference page. The target carries the
+    fully-qualified name the lookup needs; the body carries the
+    unqualified spelling the reader sees, matching the source.
+
+    \a concepts holds fully-qualified concept names captured from the
+    AST. They map to their unqualified last segment for matching against
+    the requires-clause text. The fully-qualified name goes in the
+    marker target so the generator's lookup follows the same contract as
+    the \c{\concept} command, which registers the concept under its
+    fully-qualified name.
+
+    A single combined pass substitutes every concept in one sweep over
+    the original text. Replacing one concept at a time would re-scan the
+    markers it just inserted, so a later display name could match inside
+    an earlier marker's target attribute and corrupt it. The display
+    names are de-duplicated (the requires-clause text alone can't tell
+    two concepts that share an unqualified spelling apart) and the
+    alternation lists the longest first so a prefix such as \c {Hashable}
+    yields to \c {HashableContainer}.
+
+    The input text is expected to be the \c{protect()}-escaped requires
+    clause. The unqualified concept identifiers consist of letters,
+    digits, and underscores only, so they pass through \c{protect()}
+    unchanged; word boundary anchors ensure only standalone concept-name
+    tokens are substituted.
+*/
+static QString markupConceptReferences(QString text, const QStringList &concepts)
+{
+    QStringList sorted = concepts;
+    std::sort(sorted.begin(), sorted.end(),
+              [](const QString &a, const QString &b) { return a.size() > b.size(); });
+
+    QHash<QString, QString> targetForDisplay;
+    QStringList displayAlternatives;
+    for (const QString &concept_name : std::as_const(sorted)) {
+        const QString unqualified = concept_name.section("::"_L1, -1);
+        if (targetForDisplay.contains(unqualified))
+            continue;
+        targetForDisplay.insert(unqualified, concept_name);
+        displayAlternatives << QRegularExpression::escape(unqualified);
+    }
+    if (displayAlternatives.isEmpty())
+        return text;
+
+    const QRegularExpression re("\\b("_L1 + displayAlternatives.join('|'_L1) + ")\\b"_L1);
+    QString result;
+    qsizetype last = 0;
+    auto it = re.globalMatch(text);
+    while (it.hasNext()) {
+        const QRegularExpressionMatch match = it.next();
+        result += QStringView(text).mid(last, match.capturedStart() - last);
+        const QString display = match.captured(1);
+        result += "<@concept target=\""_L1 + targetForDisplay.value(display) + "\">"_L1
+                + display + "</@concept>"_L1;
+        last = match.capturedEnd();
+    }
+    result += QStringView(text).mid(last);
+    return result;
+}
+
+/*!
+    \internal
+
+    Returns a \c{QStringList} carrying the contents of \a refs converted
+    from \c{std::string}.
+*/
+static QStringList toQStringList(const std::vector<std::string> &refs)
+{
+    QStringList result;
+    result.reserve(int(refs.size()));
+    for (const auto &s : refs)
+        result.append(QString::fromStdString(s));
+    return result;
+}
+
+/*!
+    \internal
+
+    Returns a marked-up representation of a single template parameter
+    with proper type markup for link generation.
+
+    Types (in non-type parameters and initializers) are wrapped with
+    \c{<@type>} tags so the HTML generator can create hyperlinks to
+    documented types.
+*/
+QString CppCodeMarker::formatTemplateParameter(const RelaxedTemplateParameter &param)
+{
+    QString result;
+    const auto &decl = param.valued_declaration;
+
+    if (param.template_declaration)
+        result += formatTemplateDeclStorage(*param.template_declaration, TemplateFormat::SingleLine) + ' '_L1;
+
+    // TODO: RelaxedTemplateParameter doesn't preserve whether the original
+    // declaration used 'class' or 'typename'. This would require parser changes.
+    switch (param.kind) {
+    case RelaxedTemplateParameter::Kind::TypeTemplateParameter:
+        if (param.concept_name) {
+            const QString fq = QString::fromStdString(*param.concept_name);
+            const QString unqualified = fq.section("::"_L1, -1);
+            result += "<@concept target=\""_L1 + fq + "\">"_L1
+                    + unqualified + "</@concept>"_L1;
+        } else {
+            result += "typename"_L1;
+        }
+        break;
+    case RelaxedTemplateParameter::Kind::NonTypeTemplateParameter:
+        if (!decl.type.empty())
+            result += typified(QString::fromStdString(decl.type), false);
+        break;
+    case RelaxedTemplateParameter::Kind::TemplateTemplateParameter:
+        result += "typename"_L1;
+        break;
+    }
+
+    if (param.is_parameter_pack)
+        result += "..."_L1;
+
+    if (!decl.name.empty()) {
+        if (!result.isEmpty() && !result.endsWith(' '_L1))
+            result += ' '_L1;
+        result += protect(QString::fromStdString(decl.name));
+    }
+
+    if (!decl.initializer.empty()) {
+        result += " = "_L1;
+        if (param.kind == RelaxedTemplateParameter::Kind::TypeTemplateParameter
+            || param.kind == RelaxedTemplateParameter::Kind::TemplateTemplateParameter) {
+            result += typified(QString::fromStdString(decl.initializer), false);
+        } else {
+            result += protect(QString::fromStdString(decl.initializer));
+        }
+    }
+
+    return result;
+}
+
+/*!
+    \internal
+
+    Returns a marked-up representation of a template declaration storage,
+    handling the common case for both top-level and nested (template template
+    parameter) declarations.
+
+    When \a format is MultiLine, parameters are formatted one per line with
+    indentation. Nested template declarations (called from formatTemplateParameter)
+    are always single-line.
+
+    This helper formats the core \c{template <...>} content without wrapper tags
+    or requires clause. The caller (formatTemplateDecl) handles those for
+    top-level declarations.
+
+    \sa formatTemplateParameter()
+*/
+QString CppCodeMarker::formatTemplateDeclStorage(const TemplateDeclarationStorage &templateDecl,
+                                                  TemplateFormat format)
+{
+    const bool multiline = (format == TemplateFormat::MultiLine);
+
+    QString result = "template &lt;"_L1;
+
+    if (multiline)
+        result += '\n'_L1;
+
+    bool first = true;
+    for (const auto &param : templateDecl.parameters) {
+        if (param.sfinae_constraint)
+            continue;
+        if (!first)
+            result += multiline ? ",\n"_L1 : ", "_L1;
+        if (multiline)
+            result += "    "_L1;  // indentation for multiline format
+
+        result += formatTemplateParameter(param);
+        first = false;
+    }
+
+    if (multiline)
+        result += '\n'_L1;
+
+    result += "&gt;"_L1;
+
+    return result;
+}
+
+/*!
+    Returns a marked-up representation of the template declaration suitable
+    for synopsis output. For declarations above the multiline threshold,
+    a multiline format is used for improved readability.
+
+    Types within template parameters (non-type parameter types and default
+    value initializers) are wrapped with \c{<@type>} tags to enable link
+    generation to documented types.
+*/
+QString CppCodeMarker::formatTemplateDecl(const RelaxedTemplateDeclaration *templateDecl)
+{
+    const bool multiline = templateDecl->visibleParameterCount() > QDoc::MultilineTemplateParamThreshold;
+    const auto format = multiline ? TemplateFormat::MultiLine : TemplateFormat::SingleLine;
+
+    QString content = formatTemplateDeclStorage(*templateDecl, format);
+
+    QString result;
+    if (multiline)
+        result = "<@template-block>"_L1;
+
+    result += content;
+
+    if (templateDecl->requires_clause && !templateDecl->requires_clause->empty()) {
+        QString clause = protect(QString::fromStdString(*templateDecl->requires_clause));
+        clause = markupConceptReferences(std::move(clause),
+                                         toQStringList(templateDecl->referenced_concepts));
+        result += " requires "_L1 + clause;
+    }
+
+    if (multiline)
+        result += '\n'_L1 + "</@template-block>"_L1;
+    else
+        result += ' '_L1;
+
+    return result;
+}
 
 /*!
   Returns \c true.
@@ -42,11 +272,11 @@ bool CppCodeMarker::recognizeExtension(const QString &extension)
 }
 
 /*!
-  Returns \c true if \a lang is either "C" or "Cpp".
+  Returns \c true if \a lang is either "c" or "cpp".
  */
 bool CppCodeMarker::recognizeLanguage(const QString &lang)
 {
-    return lang == QLatin1String("C") || lang == QLatin1String("Cpp");
+    return lang == QLatin1String("c") || lang == QLatin1String("cpp");
 }
 
 /*!
@@ -86,19 +316,18 @@ QString CppCodeMarker::markedUpSynopsis(const Node *node, const Node * /* relati
     }
 
     switch (node->nodeType()) {
-    case Node::Namespace:
-    case Node::Class:
-    case Node::Struct:
-    case Node::Union:
+    case NodeType::Namespace:
+    case NodeType::Class:
+    case NodeType::Struct:
+    case NodeType::Union:
         synopsis = Node::nodeTypeString(node->nodeType());
         synopsis += QLatin1Char(' ') + name;
         break;
-    case Node::Function:
+    case NodeType::Function:
         func = (const FunctionNode *)node;
         if (style == Section::Details) {
-            auto templateDecl = node->templateDecl();
-            if (templateDecl)
-                synopsis = protect((*templateDecl).to_qstring()) + QLatin1Char(' ');
+            if (auto templateDecl = node->templateDecl())
+                synopsis = formatTemplateDecl(&*templateDecl);
         }
         if (style != Section::AllMembers && !func->returnType().isEmpty())
             synopsis += typified(func->returnTypeString(), true);
@@ -110,13 +339,22 @@ QString CppCodeMarker::markedUpSynopsis(const Node *node, const Node * /* relati
                 for (int i = 0; i < parameters.count(); ++i) {
                     if (i > 0)
                         synopsis += ", ";
-                    QString name = parameters.at(i).name();
-                    QString type = parameters.at(i).type();
-                    QString value = parameters.at(i).defaultValue();
-                    bool trailingSpace = style != Section::AllMembers && !name.isEmpty();
-                    synopsis += typified(type, trailingSpace);
-                    if (style != Section::AllMembers && !name.isEmpty())
+                    const Parameter &param = parameters.at(i);
+                    QString name = param.name();
+                    QString type = param.type();
+                    QString value = param.defaultValue();
+                    qsizetype insertPos = param.nameInsertionPoint();
+                    if (insertPos >= 0 && style != Section::AllMembers && !name.isEmpty()) {
+                        // Inside-out declarator: name goes inside the type.
+                        synopsis += typified(type.left(insertPos), false);
                         synopsis += "<@param>" + protect(name) + "</@param>";
+                        synopsis += typified(type.mid(insertPos), false);
+                    } else {
+                        bool trailingSpace = style != Section::AllMembers && !name.isEmpty();
+                        synopsis += typified(type, trailingSpace);
+                        if (style != Section::AllMembers && !name.isEmpty())
+                            synopsis += "<@param>" + protect(name) + "</@param>";
+                    }
                     if (style != Section::AllMembers && !value.isEmpty())
                         synopsis += " = " + protect(value);
                 }
@@ -147,14 +385,23 @@ QString CppCodeMarker::markedUpSynopsis(const Node *node, const Node * /* relati
                 synopsis.append(" &");
             else if (func->isRefRef())
                 synopsis.append(" &&");
+            if (const auto &req = func->trailingRequiresClause(); req && !req->isEmpty()) {
+                QString clause = protect(*req);
+                clause = markupConceptReferences(std::move(clause),
+                                                 func->referencedConcepts());
+                synopsis.append(" requires " + clause);
+            }
         }
         break;
-    case Node::Enum:
+    case NodeType::Enum:
         enume = static_cast<const EnumNode *>(node);
-        synopsis = "enum ";
+        synopsis = "enum";
         if (enume->isScoped())
-            synopsis += "class ";
-        synopsis += name;
+            synopsis += " class";
+        if (!enume->isAnonymous())
+            synopsis += " %1"_L1.arg(name);
+        else if (style != Section::Details)
+            synopsis = linkTag(node, synopsis); // Unnamed enum: Make `enum` a link to details
         if (style == Section::Summary) {
             synopsis += " { ";
 
@@ -182,30 +429,29 @@ QString CppCodeMarker::markedUpSynopsis(const Node *node, const Node * /* relati
             synopsis += QLatin1Char('}');
         }
         break;
-    case Node::TypeAlias:
+    case NodeType::TypeAlias:
         if (style == Section::Details) {
-            auto templateDecl = node->templateDecl();
-            if (templateDecl)
-                synopsis += protect((*templateDecl).to_qstring()) + QLatin1Char(' ');
+            if (auto templateDecl = node->templateDecl())
+                synopsis += formatTemplateDecl(&*templateDecl);
         }
         synopsis += name;
         break;
-    case Node::Typedef:
+    case NodeType::Typedef:
         if (static_cast<const TypedefNode *>(node)->associatedEnum())
             synopsis = "flags ";
         synopsis += name;
         break;
-    case Node::Property: {
+    case NodeType::Property: {
         auto property = static_cast<const PropertyNode *>(node);
         synopsis = name + " : " + typified(property->qualifiedDataType());
         break;
     }
-    case Node::QmlProperty: {
+    case NodeType::QmlProperty: {
         auto property = static_cast<const QmlPropertyNode *>(node);
         synopsis = name + " : " + typified(property->dataType());
         break;
     }
-    case Node::Variable:
+    case NodeType::Variable:
         variable = static_cast<const VariableNode *>(node);
         if (style == Section::AllMembers) {
             synopsis = name + " : " + typified(variable->dataType());
@@ -214,7 +460,7 @@ QString CppCodeMarker::markedUpSynopsis(const Node *node, const Node * /* relati
         }
         break;
     default:
-        synopsis = name;
+        synopsis = std::move(name);
     }
 
     QString extra = CodeMarker::extraSynopsis(node, style);
@@ -244,7 +490,7 @@ QString CppCodeMarker::markedUpQmlItem(const Node *node, bool summary)
     if (node->isQmlProperty()) {
         const auto *pn = static_cast<const QmlPropertyNode *>(node);
         synopsis = name + " : " + typified(pn->dataType());
-    } else if (node->isFunction(Node::QML)) {
+    } else if (node->isFunction(Genus::QML)) {
         const auto *func = static_cast<const FunctionNode *>(node);
         if (!func->returnType().isEmpty())
             synopsis = typified(func->returnTypeString(), true) + name;
@@ -261,16 +507,16 @@ QString CppCodeMarker::markedUpQmlItem(const Node *node, bool summary)
                 QString paramName;
                 if (!name.isEmpty()) {
                     synopsis += typified(type, true);
-                    paramName = name;
+                    paramName = std::move(name);
                 } else {
-                    paramName = type;
+                    paramName = std::move(type);
                 }
                 synopsis += "<@param>" + protect(paramName) + "</@param>";
             }
         }
         synopsis += QLatin1Char(')');
     } else {
-        synopsis = name;
+        synopsis = std::move(name);
     }
 
     QString extra = CodeMarker::extraSynopsis(node, summary ? Section::Summary : Section::Details);
@@ -294,15 +540,22 @@ QString CppCodeMarker::markedUpEnumValue(const QString &enumValue, const Node *r
 {
     const auto *node = relative->parent();
 
-    if (relative->isQmlProperty()) {
-        const auto *qpn = static_cast<const QmlPropertyNode*>(relative);
-        if (qpn->enumNode() && !enumValue.startsWith("%1."_L1.arg(qpn->enumPrefix())))
-            return "%1<@op>.</@op>%2"_L1.arg(qpn->enumPrefix(), enumValue);
+    const NativeEnum *nativeEnum{nullptr};
+    if (auto *ne_if = dynamic_cast<const NativeEnumInterface *>(relative))
+        nativeEnum = ne_if->nativeEnum();
+
+    if (nativeEnum && nativeEnum->enumNode()
+            && !enumValue.startsWith("%1."_L1.arg(nativeEnum->prefix())))
+        return "%1<@op>.</@op>%2"_L1.arg(nativeEnum->prefix(), enumValue);
+
+    // Respect existing prefixes in \value arguments of \qmlenum topic
+    if (relative->isEnumType(Genus::QML)
+            && enumValue.section(' ', 0, 0).contains('.'_L1)) {
+        return "<@op>%1</@op>"_L1.arg(enumValue);
     }
 
-    if (!relative->isEnumType()) {
+    if (!relative->isEnumType())
         return enumValue;
-    }
 
     QStringList parts;
     while (!node->isHeader() && node->parent()) {
@@ -315,7 +568,8 @@ QString CppCodeMarker::markedUpEnumValue(const QString &enumValue, const Node *r
         parts.append(relative->name());
 
     parts.append(enumValue);
-    return parts.join(QLatin1String("<@op>::</@op>"));
+    const auto &delim = (relative->genus() == Genus::QML) ? "."_L1 : "::"_L1;
+    return parts.join("<@op>%1</@op>"_L1.arg(delim));
 }
 
 QString CppCodeMarker::addMarkUp(const QString &in, const Node * /* relative */,

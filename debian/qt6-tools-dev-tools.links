@@ -1,0 +1,2 @@
+# qtdiag and qtdiag6 are identical files
+usr/lib/qt6/bin/qtdiag6 usr/lib/qt6/bin/qtdiag

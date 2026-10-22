@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "qhelpsearchindexreader_p.h"
 #include "qhelpenginecore.h"
@@ -141,7 +142,7 @@ QList<QHelpSearchResult> Reader::queryTable(const QSqlDatabase &db, const QStrin
         const QString &url = query.value("url"_L1).toString();
         const QString &title = query.value("title"_L1).toString();
         const QString &snippet = query.value(2).toString();
-        results.append(QHelpSearchResult(url, title, snippet));
+        results.append(QHelpSearchResult(QUrl(url), title, snippet));
     }
     return results;
 }

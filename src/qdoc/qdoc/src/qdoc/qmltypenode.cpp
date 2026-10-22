@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
 
 #include "qmltypenode.h"
+#include "classnode.h"
 #include "collectionnode.h"
 #include "qdocdatabase.h"
 
@@ -15,13 +16,23 @@ QMultiMap<const Node *, Node *> QmlTypeNode::s_inheritedBy;
   Constructs a Qml type.
 
   The new node has the given \a parent, name \a name, and a specific node
-  \a type. Valid types are Node::QmlType and Node::QmlValueType.
+  \a type. Valid types are NodeType::QmlType and NodeType::QmlValueType.
  */
-QmlTypeNode::QmlTypeNode(Aggregate *parent, const QString &name, Node::NodeType type)
+QmlTypeNode::QmlTypeNode(Aggregate *parent, const QString &name, NodeType type)
     : Aggregate(type, parent, name)
 {
-    Q_ASSERT(type == Node::QmlType || type == Node::QmlValueType);
-    setTitle(name);
+    Q_ASSERT(type == NodeType::QmlType || type == NodeType::QmlValueType);
+}
+
+/*!
+  Set ClassNode \a cn as this QML type's \e {native type},
+  and adopts its attribute if not set explicitly.
+*/
+void QmlTypeNode::setClassNode(ClassNode *cn)
+{
+    m_classNode = cn;
+    if (m_qmlNativeTypeAttr == QmlNativeTypeAttribute::None)
+        m_qmlNativeTypeAttr = cn->qmlNativeTypeAttribute();
 }
 
 /*!
@@ -48,11 +59,18 @@ void QmlTypeNode::addInheritedBy(const Node *base, Node *sub)
 /*!
   Loads the list \a subs with the nodes of all the subclasses of \a base.
  */
-void QmlTypeNode::subclasses(const Node *base, NodeList &subs)
+void QmlTypeNode::subclasses(const Node *base, NodeList &subs, bool recurse)
 {
-    subs.clear();
     if (s_inheritedBy.count(base) > 0) {
-        subs = s_inheritedBy.values(base);
+        if (recurse) {
+            for (auto *sub : s_inheritedBy.values(base)) {
+                if (!subs.contains(sub)) {
+                    subs.append(sub);
+                    QmlTypeNode::subclasses(sub, subs, recurse);
+                }
+            }
+        } else
+            subs = s_inheritedBy.values(base);
     }
 }
 
@@ -103,9 +121,9 @@ QString QmlTypeNode::logicalModuleIdentifier() const
 /*!
   Returns true if this QML type inherits \a type.
  */
-bool QmlTypeNode::inherits(Aggregate *type)
+bool QmlTypeNode::inherits(const Aggregate *type) const
 {
-    QmlTypeNode *qtn = qmlBaseNode();
+    const QmlTypeNode *qtn = qmlBaseNode();
     while (qtn != nullptr) {
         if (qtn == type)
             return true;
@@ -126,27 +144,77 @@ void QmlTypeNode::resolveInheritance(NodeMap &previousSearches)
         return;
 
     auto *base = static_cast<QmlTypeNode *>(previousSearches.value(m_qmlBaseName));
-    if (!previousSearches.contains(m_qmlBaseName)) {
+
+    // If the cached base is from a different module, we need to search again
+    // to respect module context for disambiguation
+    bool needsSearch = !previousSearches.contains(m_qmlBaseName);
+    if (!needsSearch && base && logicalModule() && base->logicalModule() != logicalModule())
+        needsSearch = true;
+
+    if (needsSearch) {
         for (const auto &imp : std::as_const(m_importList)) {
-            base = QDocDatabase::qdocDB()->findQmlType(imp, m_qmlBaseName);
+            base = QDocDatabase::qdocDB()->findQmlType(imp, m_qmlBaseName, this);
             if (base)
                 break;
         }
         if (!base) {
             if (m_qmlBaseName.contains(':'))
-                base = QDocDatabase::qdocDB()->findQmlType(m_qmlBaseName);
+                base = QDocDatabase::qdocDB()->findQmlType(m_qmlBaseName, this);
             else
-                base = QDocDatabase::qdocDB()->findQmlType(QString(), m_qmlBaseName);
+                base = QDocDatabase::qdocDB()->findQmlType(QString(), m_qmlBaseName, this);
         }
-        previousSearches.insert(m_qmlBaseName, base);
+        // Only cache if we don't have a module (to avoid polluting cache with module-specific results)
+        if (!logicalModule())
+            previousSearches.insert(m_qmlBaseName, base);
     }
 
-    if (base && base != this) {
-        m_qmlBaseNode = base;
-        QmlTypeNode::addInheritedBy(base, this);
-        // Base types read from the index need resolving as they only have the name set
-        if (base->isIndexNode())
-            base->resolveInheritance(previousSearches);
+    if (base) {
+        if (base != this) {
+            m_qmlBaseNode = base;
+            QmlTypeNode::addInheritedBy(base, this);
+            // Base types read from the index need resolving as they only have the name set
+            if (base->isIndexNode())
+                base->resolveInheritance(previousSearches);
+        } else
+            location().warning(QStringLiteral("Type is its own base type: '%1'").arg(name()));
+    }
+
+    if (!base)
+        location().report(QStringLiteral("Unknown base '%1' for QML type '%2'").arg(qmlBaseName(), name()));
+}
+
+/*!
+    Checks and warns about problems with the inheritance of this QML type.
+*/
+void QmlTypeNode::checkInheritance()
+{
+    /* Use Floyd's cycle-finding algorithm (tortoise and hare) to detect base
+       types that inherit from their descendants. */
+    const QmlTypeNode *qtn = this;
+    const QmlTypeNode *hare = qtn;
+
+    // Record the previous type found by the hare for reporting.
+    QmlTypeNode *previous = nullptr;
+
+    while (qtn && hare) {
+        // Examine the base node.
+        qtn = qtn->qmlBaseNode();
+
+        /* The hare node moves two nodes up the inheritance tree to increase
+           the cycle detection distance, recording the previous type in case
+           it needs to be reported. */
+        for (int i = 0; i < 2; i++)
+            if (hare) {
+                previous = const_cast<QmlTypeNode *>(hare);
+                hare = hare->qmlBaseNode();
+            }
+
+        // Only report a cycle if both nodes are non-null and identical.
+        if (previous && qtn && hare && qtn == hare) {
+            location().warning(QStringLiteral("Cyclic type inheritance: '%1'").arg(previous->name()));
+            previous->m_qmlBaseNode = nullptr;
+            break;
+        }
     }
 }
 

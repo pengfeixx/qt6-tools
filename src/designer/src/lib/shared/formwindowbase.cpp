@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #include "formwindowbase_p.h"
 #include "connectionedit_p.h"
@@ -65,6 +66,7 @@ public:
     FormWindowBase::ResourceFileSaveMode m_saveResourcesBehaviour;
     bool m_useIdBasedTranslations;
     bool m_connectSlotsByName;
+    QString m_idBasedTranslationLabel;
 };
 
 FormWindowBasePrivate::FormWindowBasePrivate(QDesignerFormEditorInterface *core) :
@@ -513,6 +515,16 @@ bool FormWindowBase::useIdBasedTranslations() const
 void FormWindowBase::setUseIdBasedTranslations(bool v)
 {
     m_d->m_useIdBasedTranslations = v;
+}
+
+QString FormWindowBase::idBasedTranslationLabel() const
+{
+    return m_d->m_idBasedTranslationLabel;
+}
+
+void FormWindowBase::setIdBasedTranslationLabel(const QString &v)
+{
+    m_d->m_idBasedTranslationLabel = v;
 }
 
 bool FormWindowBase::connectSlotsByName() const

@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR BSD-3-Clause
+// Qt-Security score:significant reason:default
 
 //! [1]
 #include <QtUiTools>
@@ -13,7 +14,7 @@ void on_<object name>_<signal name>(<signal parameters>);
 
 //! [7]
 class MyExtension: public QObject,
-                   public QdesignerContainerExtension
+                   public QDesignerContainerExtension
 {
     Q_OBJECT
     Q_INTERFACE(QDesignerContainerExtension)

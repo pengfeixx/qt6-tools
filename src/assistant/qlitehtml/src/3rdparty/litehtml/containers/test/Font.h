@@ -1,19 +1,41 @@
 #include "Bitmap.h"
 
-class Font
+class Font : public font_metrics
 {
 public:
-	int width    = 0;
-	int height   = 0;
-	int ascent   = 0;
-	int descent  = 0;
-	int x_height = 0;
-	Bitmap glyphs[128];
-	
-	static string font_dir;
+	static Font* create(string face, int size, int weight);
+	virtual pixel_t text_width(string text) = 0;
+	virtual void draw_text(canvas& canvas, string text, color color, int x, int y) = 0;
+};
+
+class RasterFont : public Font
+{
+	int width = 0; // for absent glyphs, see get_glyph
+	std::map<int, Bitmap> glyphs;
+public:
+	RasterFont(int size, int weight);
+
 	static struct size_name { int size; string name; } installed_fonts[];
-	
-	Font(int size);
-	Bitmap get_glyph(int ch, web_color color);
+	static RasterFont* create(string face, int size, int weight);
+
+	Bitmap get_glyph(int ch, color color);
 	void load(string filename);
+
+	pixel_t text_width(string text) override;
+	void draw_text(canvas& canvas, string text, color color, int x, int y) override;
+};
+
+class OutlineFont : public Font
+{
+	string name;
+	string data; // raw contents of ttf file
+	int size = 0; // pixels per em
+public:
+	OutlineFont(string name, int size);
+
+	static string_map installed_fonts;
+	static OutlineFont* create(string name, int size);
+
+	pixel_t text_width(string text) override;
+	void draw_text(canvas& canvas, string text, color color, int x, int y) override;
 };

@@ -25,6 +25,27 @@
 
 QT_BEGIN_NAMESPACE
 
+using namespace Qt::Literals::StringLiterals;
+
+#ifdef Q_OS_WIN
+static bool usesCRLF(const QString &filename)
+{
+    QFile file(filename);
+    if (!file.open(QIODevice::ReadOnly))
+        return false;
+    return file.read(4096).contains("\r\n"_ba);
+}
+#endif
+
+QString friendlyString(const QString &str)
+{
+    QString f = str.toLower();
+    static QRegularExpression re("[.,:;!?()-]"_L1);
+    f.replace(re, " "_L1);
+    f.remove(u'&');
+    return f.simplified();
+}
+
 Translator::Translator() :
     m_locationsType(AbsoluteLocations),
     m_indexOk(true)
@@ -51,32 +72,27 @@ QList<Translator::FileFormat> &Translator::registeredFileFormats()
 
 void Translator::addIndex(int idx, const TranslatorMessage &msg) const
 {
-    if (msg.sourceText().isEmpty() && msg.id().isEmpty()) {
-        m_ctxCmtIdx[msg.context()] = idx;
-    } else {
-        m_msgIdx[TMMKey(msg)] = idx;
-        if (!msg.id().isEmpty())
-            m_idMsgIdx[msg.id()] = idx;
-    }
+
+    m_msgIdx[TMMKey(msg)] = idx;
+    if (!msg.id().isEmpty())
+        m_idMsgIdx[msg.id()] = idx;
+
 }
 
 void Translator::delIndex(int idx) const
 {
     const TranslatorMessage &msg = m_messages.at(idx);
-    if (msg.sourceText().isEmpty() && msg.id().isEmpty()) {
-        m_ctxCmtIdx.remove(msg.context());
-    } else {
-        m_msgIdx.remove(TMMKey(msg));
-        if (!msg.id().isEmpty())
-            m_idMsgIdx.remove(msg.id());
-    }
+
+    m_msgIdx.remove(TMMKey(msg));
+    if (!msg.id().isEmpty())
+        m_idMsgIdx.remove(msg.id());
+
 }
 
 void Translator::ensureIndexed() const
 {
     if (!m_indexOk) {
         m_indexOk = true;
-        m_ctxCmtIdx.clear();
         m_idMsgIdx.clear();
         m_msgIdx.clear();
         for (int i = 0; i < m_messages.size(); i++)
@@ -98,14 +114,14 @@ void Translator::replaceSorted(const TranslatorMessage &msg)
 
 static QString elidedId(const QString &id, int len)
 {
-    return id.size() <= len ? id : id.left(len - 5) + QLatin1String("[...]");
+    return id.size() <= len ? id : id.left(len - 5) + "[...]"_L1;
 }
 
 static QString makeMsgId(const TranslatorMessage &msg)
 {
-    QString id = msg.context() + QLatin1String("//") + elidedId(msg.sourceText(), 100);
+    QString id = msg.context() + "//"_L1 + elidedId(msg.sourceText(), 100);
     if (!msg.comment().isEmpty())
-        id += QLatin1String("//") + elidedId(msg.comment(), 30);
+        id += "//"_L1 + elidedId(msg.comment(), 30);
     return id;
 }
 
@@ -121,33 +137,36 @@ void Translator::extend(const TranslatorMessage &msg, ConversionData &cd)
             emsg.setSourceText(msg.sourceText());
             addIndex(index, msg);
         } else if (!msg.sourceText().isEmpty() && emsg.sourceText() != msg.sourceText()) {
-            cd.appendError(QString::fromLatin1("Contradicting source strings for message with id '%1'.")
-                           .arg(emsg.id()));
+            cd.appendError(
+                    "Contradicting source strings for message with id '%1'."_L1.arg(emsg.id()));
             return;
         }
         if (emsg.extras().isEmpty()) {
             emsg.setExtras(msg.extras());
         } else if (!msg.extras().isEmpty() && emsg.extras() != msg.extras()) {
-            cd.appendError(QString::fromLatin1("Contradicting meta data for for %1.")
-                           .arg(!emsg.id().isEmpty()
-                                ? QString::fromLatin1("message with id '%1'").arg(emsg.id())
-                                : QString::fromLatin1("message '%1'").arg(makeMsgId(msg))));
+            cd.appendError("Contradicting meta data for %1."_L1.arg(
+                    !emsg.id().isEmpty() ? "message with id '%1'"_L1.arg(emsg.id())
+                                         : "message '%1'"_L1.arg(makeMsgId(msg))));
             return;
         }
-        emsg.addReferenceUniq(msg.fileName(), msg.lineNumber());
+        emsg.addReferenceUniq(msg.fileName(), msg.lineNumber(), msg.startOffset(), msg.endOffset());
         if (!msg.extraComment().isEmpty()) {
             QString cmt = emsg.extraComment();
             if (!cmt.isEmpty()) {
-                QStringList cmts = cmt.split(QLatin1String("\n----------\n"));
+                QStringList cmts = cmt.split("\n----------\n"_L1);
                 if (!cmts.contains(msg.extraComment())) {
                     cmts.append(msg.extraComment());
-                    cmt = cmts.join(QLatin1String("\n----------\n"));
+                    cmt = cmts.join("\n----------\n"_L1);
                 }
             } else {
                 cmt = msg.extraComment();
             }
             emsg.setExtraComment(cmt);
         }
+        if (emsg.label().isEmpty())
+            emsg.setLabel(msg.label());
+        else if (!msg.label().isEmpty() && emsg.label() != msg.label())
+            cd.appendError("Contradicting label for message with id %1"_L1.arg(emsg.id()));
     }
 }
 
@@ -228,17 +247,29 @@ void Translator::appendSorted(const TranslatorMessage &msg)
 
 static QString guessFormat(const QString &filename, const QString &format)
 {
-    if (format != QLatin1String("auto"))
+    if (format != "auto"_L1)
         return format;
 
     for (const Translator::FileFormat &fmt : std::as_const(Translator::registeredFileFormats())) {
-        if (filename.endsWith(QLatin1Char('.') + fmt.extension, Qt::CaseInsensitive))
+        if (filename.endsWith(u'.' + fmt.extension, Qt::CaseInsensitive))
             return fmt.extension;
     }
 
     // the default format.
     // FIXME: change to something more widely distributed later.
-    return QLatin1String("ts");
+    return "ts"_L1;
+}
+
+static QString getDependencyName(const QString &filename, const QString &format)
+{
+    const QString file = QFileInfo(filename).fileName();
+    const QString fmt = guessFormat(file, format);
+
+    if (file.endsWith(u'.' + fmt))
+        return file.chopped(fmt.size() + 1);
+
+    // no extension in the file name
+    return file;
 }
 
 bool Translator::load(const QString &filename, ConversionData &cd, const QString &format)
@@ -247,7 +278,7 @@ bool Translator::load(const QString &filename, ConversionData &cd, const QString
     cd.m_sourceFileName = filename;
 
     QFile file;
-    if (filename.isEmpty() || filename == QLatin1String("-")) {
+    if (filename.isEmpty() || filename == "-"_L1) {
 #ifdef Q_OS_WIN
         // QFile is broken for text files
         ::_setmode(0, _O_BINARY);
@@ -272,22 +303,38 @@ bool Translator::load(const QString &filename, ConversionData &cd, const QString
         if (fmt == format.extension) {
             if (format.loader)
                 return (*format.loader)(*this, file, cd);
-            cd.appendError(QString(QLatin1String("No loader for format %1 found"))
-                .arg(fmt));
+            cd.appendError(QString("No loader for format %1 found"_L1).arg(fmt));
             return false;
         }
     }
 
-    cd.appendError(QString(QLatin1String("Unknown format %1 for file %2"))
-        .arg(format, filename));
+    cd.appendError(QString("Unknown format %1 for file %2"_L1).arg(format, filename));
     return false;
 }
 
 
 bool Translator::save(const QString &filename, ConversionData &cd, const QString &format) const
 {
+    const QString fmt = guessFormat(filename, format);
+
+    const FileFormat *handler = nullptr;
+    for (const FileFormat &f : std::as_const(registeredFileFormats())) {
+        if (fmt == f.extension) {
+            handler = &f;
+            break;
+        }
+    }
+    if (!handler) {
+        cd.appendError(QString("Unknown format %1 for file %2"_L1).arg(format, filename));
+        return false;
+    }
+    if (!handler->saver) {
+        cd.appendError(QString("Saving '%1' files is not supported"_L1).arg(fmt));
+        return false;
+    }
+
     QFile file;
-    if (filename.isEmpty() || filename == QLatin1String("-")) {
+    if (filename.isEmpty() || filename == "-"_L1) {
 #ifdef Q_OS_WIN
         // QFile is broken for text files
         ::_setmode(1, _O_BINARY);
@@ -299,35 +346,38 @@ bool Translator::save(const QString &filename, ConversionData &cd, const QString
         }
     } else {
         file.setFileName(filename);
-        if (!file.open(QIODevice::WriteOnly)) {
+        QIODevice::OpenMode mode = QIODevice::WriteOnly;
+#ifdef Q_OS_WIN
+        // Preserve CRLF line endings on Windows for text formats
+        if (handler->fileType != FileFormat::TranslationBinary && usesCRLF(filename))
+            mode |= QIODevice::Text;
+#endif
+        if (!file.open(mode)) {
             cd.appendError(QString::fromLatin1("Cannot create %1: %2")
                 .arg(filename, file.errorString()));
             return false;
         }
     }
 
-    QString fmt = guessFormat(filename, format);
     cd.m_targetDir = QFileInfo(filename).absoluteDir();
 
-    for (const FileFormat &format : std::as_const(registeredFileFormats())) {
-        if (fmt == format.extension) {
-            if (format.saver)
-                return (*format.saver)(*this, file, cd);
-            cd.appendError(QString(QLatin1String("Cannot save %1 files")).arg(fmt));
-            return false;
-        }
+    if (fmt != u"ts" && m_locationsType == RelativeLocations) {
+        std::cerr << "Warning: relative locations are not supported for non TS files. "
+                     "File "
+                  << qPrintable(filename)
+                  << " will be generated with the "
+                     "default location type."
+                  << std::endl;
     }
 
-    cd.appendError(QString(QLatin1String("Unknown format %1 for file %2"))
-        .arg(format).arg(filename));
-    return false;
+    return (*handler->saver)(*this, file, cd);
 }
 
 QString Translator::makeLanguageCode(QLocale::Language language, QLocale::Territory territory)
 {
     QString result = QLocale::languageToCode(language);
     if (language != QLocale::C && territory != QLocale::AnyTerritory) {
-        result.append(QLatin1Char('_'));
+        result.append(u'_');
         result.append(QLocale::territoryToCode(territory));
     }
     return result;
@@ -388,12 +438,6 @@ int Translator::find(const QString &context,
     return -1;
 }
 
-int Translator::find(const QString &context) const
-{
-    ensureIndexed();
-    return m_ctxCmtIdx.value(context, -1);
-}
-
 void Translator::stripObsoleteMessages()
 {
     for (auto it = m_messages.begin(); it != m_messages.end(); )
@@ -426,11 +470,14 @@ void Translator::stripUntranslatedMessages()
 
 bool Translator::translationsExist() const
 {
-    for (const auto &message : m_messages) {
-        if (message.isTranslated())
-            return true;
-    }
-    return false;
+    return std::any_of(m_messages.cbegin(), m_messages.cend(),
+                       [](const auto &m) { return m.isTranslated(); });
+}
+
+bool Translator::unfinishedTranslationsExist() const
+{
+    return std::any_of(m_messages.cbegin(), m_messages.cend(),
+                       [](const auto &m) { return m.type() == TranslatorMessage::Unfinished; });
 }
 
 void Translator::stripEmptyContexts()
@@ -476,8 +523,8 @@ void Translator::dropTranslations()
 
 void Translator::dropUiLines()
 {
-    const QString uiXt = QLatin1String(".ui");
-    const QString juiXt = QLatin1String(".jui");
+    const QString uiXt = ".ui"_L1;
+    const QString juiXt = ".jui"_L1;
     for (auto &message : m_messages) {
         QHash<QString, int> have;
         QList<TranslatorMessage::Reference> refs;
@@ -485,7 +532,7 @@ void Translator::dropUiLines()
             const QString &fn = itref.fileName();
             if (fn.endsWith(uiXt) || fn.endsWith(juiXt)) {
                 if (++have[fn] == 1)
-                    refs.append(TranslatorMessage::Reference(fn, -1));
+                    refs.append(TranslatorMessage::Reference(fn, -1, -1, -1));
             } else {
                 refs.append(itref);
             }
@@ -519,9 +566,9 @@ public:
 
 Q_DECLARE_TYPEINFO(TranslatorMessageIdPtr, Q_RELOCATABLE_TYPE);
 
-inline size_t qHash(TranslatorMessageIdPtr tmp)
+inline size_t qHash(TranslatorMessageIdPtr tmp, size_t seed = 0)
 {
-    return qHash(tmp->id());
+    return qHash(tmp->id(), seed);
 }
 
 inline bool operator==(TranslatorMessageIdPtr tmp1, TranslatorMessageIdPtr tmp2)
@@ -537,12 +584,12 @@ public:
 
 Q_DECLARE_TYPEINFO(TranslatorMessageContentPtr, Q_RELOCATABLE_TYPE);
 
-inline size_t qHash(TranslatorMessageContentPtr tmp)
+inline size_t qHash(TranslatorMessageContentPtr tmp, size_t seed = 0)
 {
-    size_t hash = qHash(tmp->context()) ^ qHash(tmp->sourceText());
+    size_t hash = qHash(tmp->context(), seed) ^ qHash(tmp->sourceText(), seed);
     if (!tmp->sourceText().isEmpty())
         // Special treatment for context comments (empty source).
-        hash ^= qHash(tmp->comment());
+        hash ^= qHash(tmp->comment(), seed);
     return hash;
 }
 
@@ -656,7 +703,7 @@ void Translator::makeFileNamesAbsolute(const QDir &originalPath)
             QFileInfo fi (fileName);
             if (fi.isRelative())
                 fileName = originalPath.absoluteFilePath(fileName);
-            msg.addReference(fileName, ref.lineNumber());
+            msg.addReference(fileName, ref.lineNumber(), ref.startOffset(), ref.endOffset());
         }
     }
 }
@@ -725,7 +772,7 @@ QString Translator::guessLanguageCodeFromFileName(const QString &filename)
             break;
         }
     }
-    static QRegularExpression re(QLatin1String("[\\._]"));
+    static QRegularExpression re("[\\._]"_L1);
     while (true) {
         QLocale locale(str);
         //qDebug() << "LANGUAGE FROM " << str << "LANG: " << locale.language();
@@ -740,6 +787,27 @@ QString Translator::guessLanguageCodeFromFileName(const QString &filename)
     }
     //qDebug() << "LANGUAGE GUESSING UNSUCCESSFUL";
     return QString();
+}
+
+void Translator::appendDependencies(const QStringList &dependencies)
+{
+    QStringList mergeDeps;
+    for (const QString &dep : dependencies) {
+        if (const auto it = std::find(m_dependencies.cbegin(), m_dependencies.cend(), dep);
+            it == m_dependencies.cend()) {
+            mergeDeps.append(dep);
+        }
+    }
+    m_dependencies.append(mergeDeps);
+}
+
+void Translator::satisfyDependency(const QString &file, const QString &format)
+{
+    const auto dep = getDependencyName(file, format);
+    if (const auto it = std::find(m_dependencies.cbegin(), m_dependencies.cend(), dep);
+        it != m_dependencies.cend()) {
+        m_dependencies.erase(it);
+    }
 }
 
 bool Translator::hasExtra(const QString &key) const

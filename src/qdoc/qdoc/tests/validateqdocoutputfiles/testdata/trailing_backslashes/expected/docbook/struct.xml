@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <db:article xmlns:db="http://docbook.org/ns/docbook" xmlns:xlink="http://www.w3.org/1999/xlink" version="5.2" xml:lang="en">
 <db:info>
-<db:title></db:title>
-<db:productname>TrailingBackslashes</db:productname>
+<db:title/>
+<db:productname>Qt</db:productname>
 <db:titleabbrev>TrailingBackslashes Reference Documentation</db:titleabbrev>
 <db:abstract>
 <db:para>TrailingBackslashes Reference Documentation.</db:para></db:abstract>
@@ -11,7 +11,7 @@
 <db:varlistentry>
 <db:term>Header</db:term>
 <db:listitem>
-<db:para>Struct</db:para>
+<db:para>trailing_backslashes.h</db:para>
 </db:listitem>
 </db:varlistentry>
 </db:variablelist>

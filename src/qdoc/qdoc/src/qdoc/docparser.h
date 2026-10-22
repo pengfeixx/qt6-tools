@@ -5,6 +5,7 @@
 
 #include "atom.h"
 #include "config.h"
+#include "doc.h"
 #include "docutilities.h"
 #include "location.h"
 #include "openedlist.h"
@@ -20,7 +21,6 @@
 
 QT_BEGIN_NAMESPACE
 
-class Doc;
 class DocPrivate;
 class CodeMarker;
 struct Macro;
@@ -40,6 +40,7 @@ public:
     static QString dedent(int level, const QString &str);
 
     static int s_tabSize;
+    static QStringList s_allowedLanguages;
     static QStringList s_ignoreWords;
     static bool s_quoting;
 
@@ -66,15 +67,16 @@ private:
     void appendAtom(const LinkAtom&);
     void appendChar(QChar ch);
     void appendWord(const QString &word);
+    void appendEscapedIdentifier();
     void appendToCode(const QString &code);
-    void appendToCode(const QString &code, Atom::AtomType defaultType);
+    void appendToCode(const QString &code, Atom::AtomType defaultType, const QString &language);
     void enterPara(Atom::AtomType leftType = Atom::ParaLeft,
                    Atom::AtomType rightType = Atom::ParaRight, const QString &string = QString());
     void leavePara();
     void leaveValue();
     void leaveValueList();
     void leaveTableRow();
-    void quoteFromFile(const QString& filename);
+    void quoteFromFile(const QString& filename, CodeMarker *marker = nullptr);
     bool expandMacro(ArgumentParsingOptions options);
     void expandMacro(const QString &def, const QStringList &args);
     QString expandMacroToString(const QString &name, const Macro &macro);
@@ -82,6 +84,7 @@ private:
     QString getArgument(ArgumentParsingOptions options = ArgumentParsingOptions::Default);
     QString getBracedArgument(ArgumentParsingOptions options);
     QString getBracketedArgument();
+    QString getLanguageArgument(CodeMarker **marker);
     QStringList getMacroArguments(const QString &name, const Macro &macro);
     QString getOptionalArgument();
     QString getRestOfLine();
@@ -89,11 +92,13 @@ private:
     QString getUntilEnd(int cmd);
     QString getCode(int cmd, CodeMarker *marker, const QString &argStr = QString());
 
+    CodeMarker *markerForLanguage(const QString &language);
+
     inline bool isAutoLinkString(const QString &word);
     bool isAutoLinkString(const QString &word, qsizetype &curPos);
     bool isBlankLine();
     bool isLeftBraceAhead();
-    bool isLeftBracketAhead();
+    bool isLeftBracketAhead(int maxNewlines = 1);
     void skipSpacesOnLine();
     void skipSpacesOrOneEndl();
     void skipAllSpaces();
@@ -101,6 +106,8 @@ private:
     static bool isCode(const Atom *atom);
     static bool isQuote(const Atom *atom);
     static void expandArgumentsInString(QString &str, const QStringList &args);
+    void cmd_image(int cmd);
+    void cmd_overload();
 
     QStack<qsizetype> m_openedInputs {};
 
@@ -113,7 +120,12 @@ private:
     qsizetype m_cachedPosition {};
 
     DocPrivate *m_private { nullptr };
-    enum ParagraphState { OutsideParagraph, InSingleLineParagraph, InMultiLineParagraph };
+    enum ParagraphState {
+        OutsideParagraph,
+        InSingleLineParagraph,
+        InMultiLineParagraph,
+        InBraceDelimitedParagraph
+    };
     ParagraphState m_paragraphState {};
     bool m_inTableHeader {};
     bool m_inTableRow {};

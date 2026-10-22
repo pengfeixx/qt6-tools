@@ -6,6 +6,7 @@
 
 #include "importrec.h"
 #include "aggregate.h"
+#include "genustypes.h"
 
 #include <QtCore/qglobal.h>
 #include <QtCore/qlist.h>
@@ -21,15 +22,24 @@ typedef QList<ImportRec> ImportList;
 class QmlTypeNode : public Aggregate
 {
 public:
-    QmlTypeNode(Aggregate *parent, const QString &name, Node::NodeType type);
+    QmlTypeNode(Aggregate *parent, const QString &name, NodeType type);
     [[nodiscard]] bool isFirstClassAggregate() const override { return true; }
-    ClassNode *classNode() override { return m_classNode; }
-    void setClassNode(ClassNode *cn) override { m_classNode = cn; }
+    ClassNode *classNode() const override { return m_classNode; }
+    void setClassNode(ClassNode *cn) override;
     [[nodiscard]] bool isAbstract() const override { return m_abstract; }
     [[nodiscard]] bool isWrapper() const override { return m_wrapper; }
+    [[nodiscard]] bool isSingleton() const
+    {
+        return m_qmlNativeTypeAttr == QmlNativeTypeAttribute::Singleton;
+    }
+    [[nodiscard]] bool isUncreatable() const
+    {
+        return m_qmlNativeTypeAttr == QmlNativeTypeAttribute::Uncreatable;
+    }
     void setAbstract(bool b) override { m_abstract = b; }
     void setWrapper() override { m_wrapper = true; }
-    [[nodiscard]] bool isInternal() const override { return (status() == Internal); }
+    void setSingleton() { m_qmlNativeTypeAttr = QmlNativeTypeAttribute::Singleton; }
+    void setUncreatable() { m_qmlNativeTypeAttr = QmlNativeTypeAttribute::Uncreatable; }
     [[nodiscard]] QString qmlFullBaseName() const override;
     [[nodiscard]] QString logicalModuleName() const override;
     [[nodiscard]] QString logicalModuleVersion() const override;
@@ -38,14 +48,16 @@ public:
     void setQmlModule(CollectionNode *t) override { m_logicalModule = t; }
 
     void setImportList(const ImportList &il) { m_importList = il; }
+    [[nodiscard]] const ImportList &importList() const { return m_importList; }
     [[nodiscard]] const QString &qmlBaseName() const { return m_qmlBaseName; }
     void setQmlBaseName(const QString &name) { m_qmlBaseName = name; }
     [[nodiscard]] QmlTypeNode *qmlBaseNode() const override { return m_qmlBaseNode; }
     void resolveInheritance(NodeMap &previousSearches);
+    void checkInheritance();
     static void addInheritedBy(const Node *base, Node *sub);
-    static void subclasses(const Node *base, NodeList &subs);
+    static void subclasses(const Node *base, NodeList &subs, bool recurse = false);
     static void terminate();
-    bool inherits(Aggregate *type);
+    [[nodiscard]] bool inherits(const Aggregate *type) const;
 
 public:
     static QMultiMap<const Node *, Node *> s_inheritedBy;
@@ -53,6 +65,7 @@ public:
 private:
     bool m_abstract { false };
     bool m_wrapper { false };
+    QmlNativeTypeAttribute m_qmlNativeTypeAttr { QmlNativeTypeAttribute::None };
     ClassNode *m_classNode { nullptr };
     QString m_qmlBaseName {};
     CollectionNode *m_logicalModule { nullptr };

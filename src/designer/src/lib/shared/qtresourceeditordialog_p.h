@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 //
 //  W A R N I N G
@@ -15,8 +16,9 @@
 #ifndef QTRESOURCEEDITOR_H
 #define QTRESOURCEEDITOR_H
 
-#include <QtCore/qscopedpointer.h>
 #include <QtWidgets/qdialog.h>
+
+#include <memory>
 
 QT_BEGIN_NAMESPACE
 
@@ -46,7 +48,7 @@ private:
     QtResourceEditorDialog(QDesignerFormEditorInterface *core, QDesignerDialogGuiInterface *dlgGui, QWidget *parent = nullptr);
     ~QtResourceEditorDialog() override;
 
-    QScopedPointer<class QtResourceEditorDialogPrivate> d_ptr;
+    std::unique_ptr<class QtResourceEditorDialogPrivate> d_ptr;
     Q_DECLARE_PRIVATE(QtResourceEditorDialog)
     Q_DISABLE_COPY_MOVE(QtResourceEditorDialog)
 };

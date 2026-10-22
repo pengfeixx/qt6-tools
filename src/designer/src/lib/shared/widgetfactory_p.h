@@ -1,5 +1,6 @@
 
 
+// Qt-Security score:significant reason:default
 
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
@@ -45,7 +46,7 @@ class QDESIGNER_SHARED_EXPORT WidgetFactory: public QDesignerWidgetFactoryInterf
     Q_OBJECT
 public:
     explicit WidgetFactory(QDesignerFormEditorInterface *core, QObject *parent = nullptr);
-    ~WidgetFactory();
+    ~WidgetFactory() override;
 
     QWidget* containerOfWidget(QWidget *widget) const override;
     QWidget* widgetOfContainer(QWidget *widget) const override;

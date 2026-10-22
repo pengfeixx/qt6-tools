@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 //
 //  W A R N I N G
@@ -15,8 +16,8 @@
 #ifndef ABSTRACTFINDWIDGET_H
 #define ABSTRACTFINDWIDGET_H
 
-#include <QtGui/QIcon>
-#include <QtWidgets/QWidget>
+#include <QtGui/qicon.h>
+#include <QtWidgets/qwidget.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -44,7 +45,7 @@ public:
     };
     Q_DECLARE_FLAGS(FindFlags, FindFlag)
 
-    explicit AbstractFindWidget(FindFlags flags = FindFlags(), QWidget *parent = 0);
+    explicit AbstractFindWidget(FindFlags flags = FindFlags(), QWidget *parent = nullptr);
     ~AbstractFindWidget() override;
 
     bool eventFilter(QObject *object, QEvent *e) override;

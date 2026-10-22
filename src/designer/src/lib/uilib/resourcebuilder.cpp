@@ -1,5 +1,6 @@
 // Copyright (C) 2020 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "resourcebuilder_p.h"
 #include "ui4_p.h"
@@ -90,10 +91,10 @@ QVariant QResourceBuilder::loadResource(const QDir &workingDirectory, const DomP
                 if (flags & SelectedOn)
                     icon.addFile(QFileInfo(workingDirectory, dpi->elementSelectedOn()->text()).absoluteFilePath(), QSize(), QIcon::Selected, QIcon::On);
                 return QVariant::fromValue(icon);
-            } else { // 4.3 legacy
-                const QIcon icon(QFileInfo(workingDirectory, dpi->text()).absoluteFilePath());
-                return QVariant::fromValue(icon);
             }
+            // 4.3 legacy
+            const QIcon icon(QFileInfo(workingDirectory, dpi->text()).absoluteFilePath());
+            return QVariant::fromValue(icon);
         }
             break;
         default:

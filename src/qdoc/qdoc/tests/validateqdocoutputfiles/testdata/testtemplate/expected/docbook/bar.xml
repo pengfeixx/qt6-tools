@@ -3,7 +3,7 @@
 <db:info>
 <db:title>Bar Class</db:title>
 <db:subtitle>template &lt;typename T, typename D&gt; class Bar</db:subtitle>
-<db:productname>TestTemplate</db:productname>
+<db:productname>Qt</db:productname>
 <db:titleabbrev>TestTemplate Reference Documentation</db:titleabbrev>
 <db:abstract>
 <db:para>Another class template.</db:para>
@@ -14,7 +14,7 @@
 <db:varlistentry>
 <db:term>Header</db:term>
 <db:listitem>
-<db:para>Bar</db:para>
+<db:para>testtemplate.h</db:para>
 </db:listitem>
 </db:varlistentry>
 <db:varlistentry>
@@ -39,5 +39,6 @@
 </db:variablelist>
 <db:section xml:id="details">
 <db:title>Detailed Description</db:title>
+<db:para><db:code role="parameter">T</db:code> is the first type, <db:code role="parameter">D</db:code> is the second type.</db:para>
 </db:section>
 </db:article>

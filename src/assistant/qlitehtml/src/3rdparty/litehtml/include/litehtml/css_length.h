@@ -2,9 +2,22 @@
 #define LH_CSS_LENGTH_H
 
 #include "types.h"
+#include "css_tokenizer.h"
 
 namespace litehtml
 {
+	// from_token options (flags)
+	enum {
+		f_length     = 1, // <length> (includes unitless zero)
+		f_percentage = 2, // <percentage>
+		f_length_percentage = f_length | f_percentage, // <length-percentage>
+		f_number     = 4, // <number>
+		f_integer    = 8, // <integer>
+		f_positive   = 16 // ⩾0 (non-negative)
+	};
+
+	// <length> | <percentage> | <number> | auto | none | normal
+	// https://developer.mozilla.org/en-US/docs/Web/CSS/length
 	class css_length
 	{
 		union
@@ -26,13 +39,12 @@ namespace litehtml
 		void		set_value(float val, css_units units);
 		float		val() const;
 		css_units	units() const;
-		int			calc_percent(int width) const;
-		void		fromString(const string& str, const string& predefs = "", int defValue = 0);
-		static css_length from_string(const string& str, const string& predefs = "", int defValue = 0);
+		pixel_t		calc_percent(pixel_t width) const;
+		bool		from_token(const css_token& token, int options, const string& predefined_keywords = "");
 		string		to_string() const;
 	};
 
-	using length_vector = std::vector<css_length>;
+	using length_vector = vector<css_length>;
 
 	// css_length inlines
 
@@ -100,16 +112,16 @@ namespace litehtml
 		return m_units;
 	}
 
-	inline int css_length::calc_percent(int width) const
+	inline pixel_t css_length::calc_percent(pixel_t width) const
 	{
 		if(!is_predefined())
 		{
 			if(units() == css_units_percentage)
 			{
-				return (int) ((double) width * (double) m_value / 100.0);
+				return (pixel_t) (width * m_value / 100.0);
 			} else
 			{
-				return (int) val();
+				return (pixel_t) val();
 			}
 		}
 		return 0;

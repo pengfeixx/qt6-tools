@@ -100,8 +100,70 @@ QtObject {
         //~ quoted " string with spaces "
         qsTr("translation with extras-quoted field");
 
-	// template literals are supported
+        // template literals are supported
         qsTr(`template literal`);
         qsTranslate("TemplateLiteral", 'template literal 2');
+
+        // empty texts are supported
+        qsTr("");
+
+        //= id1
+        //@ label1
+        qsTr("msg with id1");
+
+        //@ label2
+        qsTr("invalid usage of label because of missing id");
+
+        //@ label3
+        //% "propagating label"
+        qsTrId("id2");
+
+        qsTrId("id2");
+
+        //% "invalid usage of label, contradicting labels for id"
+        //@ label4
+        qsTrId("id4");
+        //@ label5
+        qsTrId("id4");
+
+        //@ label6
+
+        // Auto labels testing for QML
+
+        //% "QML context auto label"
+        //@ <context>
+        qsTrId("qml.autolabel.context");
+
+        //% "QML file auto label"
+        //@ <file>
+        qsTrId("qml.autolabel.file");
+
+        // Test auto labels with qsTranslate (should warn)
+        //@ <context>
+        qsTranslate("ExplicitContext", "Auto label with explicit context");
+
+        // Test that auto labels warn for text-based qsTr
+        //@ <context>
+        qsTr("This should warn in QML");
+    }
+
+    property var flexLabels: QtObject {
+        property string fileClass: {
+            //% "QML file:context combination"
+            //@ <file>:<context>
+            return qsTrId("qml.flex.file_context");
+        }
+
+        property string complex: {
+            //% "QML complex pattern"
+            //@ module_<file>_<context>_v1
+            return qsTrId("qml.flex.complex");
+        }
+
+        property string special: {
+            //% "QML special chars"
+            //@ <file>_<context>-label
+            return qsTrId("qml.flex.special");
+        }
     }
 }

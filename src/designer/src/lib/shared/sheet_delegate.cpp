@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #include "sheet_delegate_p.h"
 
@@ -13,7 +14,7 @@ QT_BEGIN_NAMESPACE
 namespace qdesigner_internal {
 
 SheetDelegate::SheetDelegate(QTreeView *view, QWidget *parent)
-    : QItemDelegate(parent),
+    : QStyledItemDelegate(parent),
       m_view(view)
 {
 }
@@ -87,13 +88,13 @@ void SheetDelegate::paint(QPainter *painter, const QStyleOptionViewItem &option,
             option.palette, m_view->isEnabled(), text);
 
     } else {
-        QItemDelegate::paint(painter, option, index);
+        QStyledItemDelegate::paint(painter, option, index);
     }
 }
 
 QSize SheetDelegate::sizeHint(const QStyleOptionViewItem &opt, const QModelIndex &index) const
 {
-    QSize sz = QItemDelegate::sizeHint(opt, index) + QSize(2, 2);
+    QSize sz = QStyledItemDelegate::sizeHint(opt, index) + QSize(2, 2);
     return sz;
 }
 

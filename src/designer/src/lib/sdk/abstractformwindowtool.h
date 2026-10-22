@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #ifndef ABSTRACTFORMWINDOWTOOL_H
 #define ABSTRACTFORMWINDOWTOOL_H
@@ -21,7 +22,7 @@ class QDESIGNER_SDK_EXPORT QDesignerFormWindowToolInterface: public QObject
     Q_OBJECT
 public:
     explicit QDesignerFormWindowToolInterface(QObject *parent = nullptr);
-    virtual ~QDesignerFormWindowToolInterface();
+    ~QDesignerFormWindowToolInterface() override;
 
     virtual QDesignerFormEditorInterface *core() const = 0;
     virtual QDesignerFormWindowInterface *formWindow() const = 0;

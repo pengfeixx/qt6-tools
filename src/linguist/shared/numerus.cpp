@@ -14,6 +14,8 @@
 
 QT_BEGIN_NAMESPACE
 
+using namespace Qt::Literals::StringLiterals;
+
 static const uchar englishStyleRules[] =
     { Q_EQ, 1 };
 static const uchar frenchStyleRules[] =
@@ -358,6 +360,21 @@ bool getNumerusInfo(QLocale::Language language, QLocale::Territory country,
     return false;
 }
 
+bool getCountNeed(QLocale::Language lang, QLocale::Territory territory, QList<bool> &countRefNeeds,
+                  QStringList *forms)
+{
+    QByteArray rules;
+    const bool ok = getNumerusInfo(lang, territory, &rules, forms, 0);
+    countRefNeeds.clear();
+    for (int i = 0; i < rules.size(); ++i) {
+        countRefNeeds.append(!(rules.at(i) == Q_EQ
+                               && (i == (rules.size() - 2) || rules.at(i + 2) == (char)Q_NEWRULE)));
+        while (++i < rules.size() && rules.at(i) != (char)Q_NEWRULE) { }
+    }
+    countRefNeeds.append(true);
+    return ok;
+}
+
 QString getNumerusInfoString()
 {
     QStringList langs;
@@ -369,11 +386,11 @@ QString getNumerusInfoString()
                                                             : QLocale::AnyTerritory);
             QString lang = QLocale::languageToString(entry.languages[j]);
             if (loc.language() == QLocale::C)
-                lang += QLatin1String(" (!!!)");
+                lang += " (!!!)"_L1;
             else if (entry.countries && entry.countries[j] != QLocale::AnyTerritory)
-                lang += QLatin1String(" (%1)").arg(QLocale::territoryToString(loc.territory()));
+                lang += " (%1)"_L1.arg(QLocale::territoryToString(loc.territory()));
             else
-                lang += QLatin1String(" [%1]").arg(QLocale::territoryToString(loc.territory()));
+                lang += " [%1]"_L1.arg(QLocale::territoryToString(loc.territory()));
             langs << QString::fromLatin1("%1 %2 %3\n").arg(lang, -40).arg(loc.name(), -8)
                                 .arg(QString::fromLatin1(entry.gettextRules));
         }

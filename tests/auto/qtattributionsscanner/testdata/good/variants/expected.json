@@ -10,11 +10,12 @@
         "Id": "variants",
         "License": "License",
         "LicenseFiles": [
-            "%{PWD}/LICENSE1.txt",
-            "%{PWD}/LICENSE2.txt"
+            "%{PWD}/LICENSE.1.txt",
+            "%{PWD}/LICENSE.2.txt"
         ],
         "LicenseId": "",
         "Name": "Variants Test",
+        "Origin": "InSource",
         "PURL": [],
         "PackageComment": "",
         "Path": "%{PWD}",

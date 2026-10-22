@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "qhelpcollectionhandler_p.h"
 #include "qhelp_global.h"
@@ -11,12 +12,15 @@
 #include <QtCore/qdatetime.h>
 #include <QtCore/qdir.h>
 #include <QtCore/qfileinfo.h>
-#include <QtCore/qmap.h>
+#include <QtCore/qset.h>
 #include <QtCore/qtimer.h>
 #include <QtCore/qversionnumber.h>
 #include <QtSql/qsqldriver.h>
 #include <QtSql/qsqlerror.h>
 #include <QtSql/qsqlquery.h>
+
+#include <algorithm>
+#include <iterator>
 
 QT_BEGIN_NAMESPACE
 
@@ -634,7 +638,8 @@ bool QHelpCollectionHandler::setFilterData(const QString &filterName,
     QVariantList versionList;
     QVariantList filterIdList;
 
-    for (const QString &component : filterData.components()) {
+    const auto &components = filterData.components();
+    for (const QString &component : components) {
         componentList.append(component);
         filterIdList.append(filterId);
     }
@@ -646,7 +651,8 @@ bool QHelpCollectionHandler::setFilterData(const QString &filterName,
         return false;
 
     filterIdList.clear();
-    for (const QVersionNumber &version : filterData.versions()) {
+    const auto &versions = filterData.versions();
+    for (const QVersionNumber &version : versions) {
         versionList.append(version.isNull() ? QString() : version.toString());
         filterIdList.append(filterId);
     }
@@ -860,7 +866,8 @@ bool QHelpCollectionHandler::registerDocumentation(const QString &fileName)
 
     registerVersion(reader.version(), nsId);
     registerFilterAttributes(reader.filterAttributeSets(), nsId); // qset, what happens when removing documentation?
-    for (const QString &filterName : reader.customFilters())
+    const auto &customFilters = reader.customFilters();
+    for (const QString &filterName : customFilters)
         addCustomFilter(filterName, reader.filterAttributes(filterName));
 
     if (!registerIndexTable(reader.indexTable(), nsId, vfId, registeredDocumentation(ns).fileName))
@@ -1129,7 +1136,7 @@ QString QHelpCollectionHandler::namespaceForFile(const QUrl &url,
 
     const QString originalVersion = namespaceVersion(fileInfo.namespaceName);
 
-    for (const QString &ns : namespaceList) {
+    for (const QString &ns : std::as_const(namespaceList)) {
         const QString nsVersion = namespaceVersion(ns);
         if (originalVersion == nsVersion)
             return ns;
@@ -1184,7 +1191,7 @@ QString QHelpCollectionHandler::namespaceForFile(const QUrl &url,
 
     const QString originalVersion = namespaceVersion(fileInfo.namespaceName);
 
-    for (const QString &ns : namespaceList) {
+    for (const QString &ns : std::as_const(namespaceList)) {
         const QString nsVersion = namespaceVersion(ns);
         if (originalVersion == nsVersion)
             return ns;
@@ -2299,6 +2306,35 @@ QMultiMap<QString, QUrl> QHelpCollectionHandler::linksForField(const QString &fi
     return linkMap;
 }
 
+struct IndexEntry
+{
+    QString title;
+    QUrl url;
+    QVersionNumber version;
+
+private:
+    friend bool comparesEqual(const IndexEntry &lhs, const IndexEntry &rhs) noexcept
+    {
+        return lhs.title == rhs.title && lhs.url == rhs.url && lhs.version == rhs.version;
+    }
+    Q_DECLARE_EQUALITY_COMPARABLE(IndexEntry)
+};
+
+static inline bool hasVersion(const IndexEntry &e)
+{
+    return !e.version.isNull();
+}
+
+static bool versionLessThan(const IndexEntry &lhs, const IndexEntry &rhs)
+{
+    return lhs.version < rhs.version;
+}
+
+static QHelpLink toHelpLink(const IndexEntry &e)
+{
+    return { e.url, e.title };
+}
+
 QList<QHelpLink> QHelpCollectionHandler::documentsForField(const QString &fieldName,
         const QString &fieldValue, const QString &filterName) const
 {
@@ -2332,18 +2368,28 @@ QList<QHelpLink> QHelpCollectionHandler::documentsForField(const QString &fieldN
 
     m_query->exec();
 
-    QList<QHelpLink> docList;
+    QList<IndexEntry> entries;
     while (m_query->next()) {
         QString title = m_query->value(0).toString();
         if (title.isEmpty()) // generate a title + corresponding path
             title = fieldValue + " : "_L1 + m_query->value(3).toString();
-
-        const QUrl url = buildQUrl(m_query->value(1).toString(),
+        const QString nameSpace = m_query->value(1).toString();
+        const QUrl url = buildQUrl(nameSpace,
                                    m_query->value(2).toString(),
                                    m_query->value(3).toString(),
                                    m_query->value(4).toString());
-        docList.append(QHelpLink {url, title});
+        IndexEntry newEntry{ title, url, QHelpDBReader::versionHeuristic(nameSpace) };
+        if (!entries.contains(newEntry))
+            entries.emplaceBack(newEntry);
     }
+
+    // Reverse sort by trailing version number on the namespace, newest first
+    if (std::all_of(entries.cbegin(), entries.cend(), hasVersion))
+        std::stable_sort(entries.rbegin(), entries.rend(), versionLessThan);
+
+    QList<QHelpLink> docList;
+    docList.reserve(entries.size());
+    std::transform(entries.cbegin(), entries.cend(), std::back_inserter(docList), toHelpLink);
     return docList;
 }
 

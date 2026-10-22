@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #ifndef ABSTRACTPROPERTYEDITOR_H
 #define ABSTRACTPROPERTYEDITOR_H
@@ -19,7 +20,7 @@ class QDESIGNER_SDK_EXPORT QDesignerPropertyEditorInterface: public QWidget
     Q_OBJECT
 public:
     explicit QDesignerPropertyEditorInterface(QWidget *parent, Qt::WindowFlags flags = {});
-    virtual ~QDesignerPropertyEditorInterface();
+    ~QDesignerPropertyEditorInterface() override;
 
     virtual QDesignerFormEditorInterface *core() const;
 

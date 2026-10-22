@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #ifndef NEWDYNAMICPROPERTYDIALOG_P_H
 #define NEWDYNAMICPROPERTYDIALOG_P_H
@@ -36,7 +37,7 @@ class QT_PROPERTYEDITOR_EXPORT NewDynamicPropertyDialog: public QDialog
     Q_OBJECT
 public:
     explicit NewDynamicPropertyDialog(QDesignerDialogGuiInterface *dialogGui, QWidget *parent = nullptr);
-    ~NewDynamicPropertyDialog();
+    ~NewDynamicPropertyDialog() override;
 
     void setReservedNames(const QStringList &names);
     void setPropertyType(int  t);

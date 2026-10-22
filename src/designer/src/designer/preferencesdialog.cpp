@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #include "preferencesdialog.h"
 #include "ui_preferencesdialog.h"
@@ -25,7 +26,7 @@ PreferencesDialog::PreferencesDialog(QDesignerFormEditorInterface *core, QWidget
     for (QDesignerOptionsPageInterface *optionsPage : std::as_const(m_optionsPages)) {
         QWidget *page = optionsPage->createPage(this);
         m_ui->m_optionTabWidget->addTab(page, optionsPage->name());
-        if (QDesignerAppearanceOptionsWidget *appearanceWidget = qobject_cast<QDesignerAppearanceOptionsWidget *>(page))
+        if (auto *appearanceWidget = qobject_cast<QDesignerAppearanceOptionsWidget *>(page))
             connect(appearanceWidget, &QDesignerAppearanceOptionsWidget::uiModeChanged,
                     this, &PreferencesDialog::slotUiModeChanged);
     }

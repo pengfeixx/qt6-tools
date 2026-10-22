@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #ifndef SIGNALSLOTEDITOR_P_H
 #define SIGNALSLOTEDITOR_P_H
@@ -43,8 +44,8 @@ public:
 
     QString sender() const;
     QString receiver() const;
-    inline QString signal() const { return m_signal; }
-    inline QString slot() const { return m_slot; }
+    QString signal() const { return m_signal; }
+    QString slot() const { return m_slot; }
 
     DomConnection *toUi() const;
 

@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #ifndef PALETTEEDITORBUTTON_H
 #define PALETTEEDITORBUTTON_H
@@ -23,8 +24,7 @@ public:
     ~PaletteEditorButton() override;
 
     void setSuperPalette(const QPalette &palette);
-    inline QPalette palette() const
-    { return m_palette; }
+    QPalette palette() const { return m_palette; }
 
 signals:
     void paletteChanged(const QPalette &palette);

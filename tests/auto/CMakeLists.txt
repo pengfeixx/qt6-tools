@@ -1,7 +1,9 @@
 # Copyright (C) 2022 The Qt Company Ltd.
 # SPDX-License-Identifier: BSD-3-Clause
 
-add_subdirectory(cmake)
+if(NOT (WIN32 AND CMAKE_CROSSCOMPILING))
+    add_subdirectory(cmake)
+endif()
 if(QT_FEATURE_process AND NOT CMAKE_CROSSCOMPILING)
     add_subdirectory(linguist)
     add_subdirectory(qtattributionsscanner)
@@ -16,4 +18,12 @@ if(TARGET Qt::Help AND NOT CMAKE_CROSSCOMPILING)
     add_subdirectory(qhelpgenerator)
     add_subdirectory(qhelpindexmodel)
     add_subdirectory(qhelpprojectdata)
+
+    if(TARGET Qt::QmlLSPrivate)
+        add_subdirectory(helpengineplugin)
+    endif()
+endif()
+
+if(QT_FEATURE_objcnamemangler AND NOT CMAKE_CROSSCOMPILING)
+    add_subdirectory(objcnamemangler)
 endif()

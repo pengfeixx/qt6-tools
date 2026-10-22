@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 //
 //  W A R N I N G
@@ -15,7 +16,7 @@
 #ifndef QTGRADIENTSTOPSWIDGET_H
 #define QTGRADIENTSTOPSWIDGET_H
 
-#include <QtWidgets/QAbstractScrollArea>
+#include <QtWidgets/qabstractscrollarea.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -27,8 +28,8 @@ class QtGradientStopsWidget : public QAbstractScrollArea
     Q_OBJECT
     Q_PROPERTY(bool backgroundCheckered READ isBackgroundCheckered WRITE setBackgroundCheckered)
 public:
-    QtGradientStopsWidget(QWidget *parent = 0);
-    ~QtGradientStopsWidget();
+    explicit QtGradientStopsWidget(QWidget *parent = nullptr);
+    ~QtGradientStopsWidget() override;
 
     QSize minimumSizeHint() const override;
     QSize sizeHint() const override;

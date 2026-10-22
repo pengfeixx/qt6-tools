@@ -12,10 +12,11 @@ namespace litehtml
 		std::list<flex_line> m_lines;
 
 		std::list<flex_line> get_lines(const containing_block_context &self_size, formatting_context *fmt_ctx, bool is_row_direction,
-									   int container_main_size, bool single_line);
-		int _render_content(int x, int y, bool second_pass, const containing_block_context &self_size, formatting_context* fmt_ctx) override;
+									   pixel_t container_main_size, bool single_line);
+		rendered_width		 _render_content(pixel_t x, pixel_t y, bool second_pass,
+											 const containing_block_context& self_size, formatting_context* fmt_ctx) override;
 
-	public:
+	  public:
 		explicit render_item_flex(std::shared_ptr<element>  src_el) : render_item_block(std::move(src_el))
 		{}
 
@@ -25,8 +26,8 @@ namespace litehtml
 		}
 		std::shared_ptr<render_item> init() override;
 
-		int get_first_baseline() override;
-		int get_last_baseline() override;
+		pixel_t get_first_baseline() override;
+		pixel_t get_last_baseline() override;
 	};
 }
 

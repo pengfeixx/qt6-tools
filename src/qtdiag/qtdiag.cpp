@@ -298,6 +298,18 @@ void dumpRhiBackendInfo(QTextStream &str, const char *name, QRhi::Implementation
         { "HalfAttributes", QRhi::HalfAttributes },
         { "RenderToOneDimensionalTexture", QRhi::RenderToOneDimensionalTexture },
         { "ThreeDimensionalTextureMipmaps", QRhi::ThreeDimensionalTextureMipmaps },
+        { "MultiView", QRhi::MultiView },
+        { "TextureViewFormat", QRhi::TextureViewFormat },
+        { "ResolveDepthStencil", QRhi::ResolveDepthStencil },
+        { "VariableRateShading", QRhi::VariableRateShading },
+        { "VariableRateShadingMap", QRhi::VariableRateShadingMap },
+        { "VariableRateShadingMapWithTexture", QRhi::VariableRateShadingMapWithTexture },
+        { "PerRenderTargetBlending", QRhi::PerRenderTargetBlending },
+        { "SampleVariables", QRhi::SampleVariables },
+        { "InstanceIndexIncludesBaseInstance", QRhi::InstanceIndexIncludesBaseInstance },
+        { "DepthClamp", QRhi::DepthClamp },
+        { "DrawIndirect", QRhi::DrawIndirect },
+        { "DrawIndirectMulti", QRhi::DrawIndirectMulti },
 
         { nullptr, QRhi::Feature(0) }
     };
@@ -451,6 +463,13 @@ static void dumpStandardLocation(QTextStream &str, QStandardPaths::StandardLocat
         str << " *" << QDir::toNativeSeparators(writableDirectory) << '*';
 }
 
+static void dumpLibraryPath(QTextStream &str, QLibraryInfo::LibraryPath loc)
+{
+    const QStringList directories = QLibraryInfo::paths(loc);
+    for (const QString &dir : directories)
+        str << ' ' << QDir::toNativeSeparators(dir);
+}
+
 #define DUMP_CPU_FEATURE(feature, name)                 \
     if (qCpuHasFeature(feature))                        \
         str << " " name
@@ -461,7 +480,9 @@ static void dumpStandardLocation(QTextStream &str, QStandardPaths::StandardLocat
     str << '\n';
 
 #define DUMP_LIBRARYPATH(str, loc) \
-    str << "  " << #loc << ": " << QDir::toNativeSeparators(QLibraryInfo::path(QLibraryInfo::loc)) << '\n';
+    str << "  " #loc ":"; \
+    dumpLibraryPath(str, QLibraryInfo::loc); \
+    str << '\n'
 
 // Helper to format a type via QDebug to be used for QFlags/Q_ENUM.
 template <class T>
@@ -583,8 +604,6 @@ QString qtDiag(unsigned flags)
     DUMP_CPU_FEATURE(AVX512IFMA, "AVX512IFMA");
     DUMP_CPU_FEATURE(AVX512VBMI2, "AVX512VBMI2");
     DUMP_CPU_FEATURE(AVX512FP16, "AVX512FP16");
-    DUMP_CPU_FEATURE(RDRND, "RDRAND");
-    DUMP_CPU_FEATURE(RDSEED, "RDSEED");
     DUMP_CPU_FEATURE(AES, "AES");
     DUMP_CPU_FEATURE(VAES, "VAES");
     DUMP_CPU_FEATURE(SHA, "SHA");
@@ -613,20 +632,20 @@ QString qtDiag(unsigned flags)
         str << "\nFeatures: " << features.join(' ') << '\n';
 
     str << "\nLibrary info:\n";
-    DUMP_LIBRARYPATH(str, PrefixPath)
-    DUMP_LIBRARYPATH(str, DocumentationPath)
-    DUMP_LIBRARYPATH(str, HeadersPath)
-    DUMP_LIBRARYPATH(str, LibrariesPath)
-    DUMP_LIBRARYPATH(str, LibraryExecutablesPath)
-    DUMP_LIBRARYPATH(str, BinariesPath)
-    DUMP_LIBRARYPATH(str, PluginsPath)
-    DUMP_LIBRARYPATH(str, QmlImportsPath)
-    DUMP_LIBRARYPATH(str, ArchDataPath)
-    DUMP_LIBRARYPATH(str, DataPath)
-    DUMP_LIBRARYPATH(str, TranslationsPath)
-    DUMP_LIBRARYPATH(str, ExamplesPath)
-    DUMP_LIBRARYPATH(str, TestsPath)
-    DUMP_LIBRARYPATH(str, SettingsPath)
+    DUMP_LIBRARYPATH(str, PrefixPath);
+    DUMP_LIBRARYPATH(str, DocumentationPath);
+    DUMP_LIBRARYPATH(str, HeadersPath);
+    DUMP_LIBRARYPATH(str, LibrariesPath);
+    DUMP_LIBRARYPATH(str, LibraryExecutablesPath);
+    DUMP_LIBRARYPATH(str, BinariesPath);
+    DUMP_LIBRARYPATH(str, PluginsPath);
+    DUMP_LIBRARYPATH(str, QmlImportsPath);
+    DUMP_LIBRARYPATH(str, ArchDataPath);
+    DUMP_LIBRARYPATH(str, DataPath);
+    DUMP_LIBRARYPATH(str, TranslationsPath);
+    DUMP_LIBRARYPATH(str, ExamplesPath);
+    DUMP_LIBRARYPATH(str, TestsPath);
+    DUMP_LIBRARYPATH(str, SettingsPath);
 
     str << "\nStandard paths [*...* denote writable entry]:\n";
     DUMP_STANDARDPATH(str, DesktopLocation)
@@ -684,7 +703,6 @@ QString qtDiag(unsigned flags)
     DUMP_CAPABILITY(str, platformIntegration, NativeWidgets)
     DUMP_CAPABILITY(str, platformIntegration, WindowManagement)
     DUMP_CAPABILITY(str, platformIntegration, SyncState)
-    DUMP_CAPABILITY(str, platformIntegration, RasterGLSurface)
     DUMP_CAPABILITY(str, platformIntegration, AllGLFunctionsQueryable)
     DUMP_CAPABILITY(str, platformIntegration, ApplicationIcon)
     DUMP_CAPABILITY(str, platformIntegration, SwitchableWidgetComposition)

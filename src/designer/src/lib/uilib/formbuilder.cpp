@@ -1,8 +1,10 @@
 // Copyright (C) 2020 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "formbuilder.h"
 #include "formbuilderextra_p.h"
+#include "objectutils_p.h"
 #include "ui4_p.h"
 
 #include <QtUiPlugin/customwidget.h>
@@ -153,31 +155,18 @@ QWidget *QFormBuilder::createWidget(const QString &widgetName, QWidget *parentWi
             static_cast<QFrame*>(w)->setFrameStyle(QFrame::HLine | QFrame::Sunken);
             break;
         }
-        const QByteArray widgetNameBA = widgetName.toUtf8();
-        const char *widgetNameC = widgetNameBA.constData();
-        if (w) { // symmetry for macro
-        }
-
-#define DECLARE_LAYOUT(L, C)
-#define DECLARE_COMPAT_WIDGET(W, C)
-#define DECLARE_WIDGET(W, C) else if (!qstrcmp(widgetNameC, #W)) { Q_ASSERT(w == 0); w = new W(parentWidget); }
-#define DECLARE_WIDGET_1(W, C) else if (!qstrcmp(widgetNameC, #W)) { Q_ASSERT(w == 0); w = new W(0, parentWidget); }
-
-#include "widgets.table"
-
-#undef DECLARE_COMPAT_WIDGET
-#undef DECLARE_LAYOUT
-#undef DECLARE_WIDGET
-#undef DECLARE_WIDGET_1
-
-        if (w)
+        QWidget *newWidget = createWidgetInstance(widgetName, parentWidget);
+        if (newWidget) {
+            Q_ASSERT(w == nullptr);
+            w = newWidget;
             break;
+        }
 
         // try with a registered custom widget
         QDesignerCustomWidgetInterface *factory = d->m_customWidgets.value(widgetName);
         if (factory != nullptr)
             w = factory->createWidget(parentWidget);
-    } while(false);
+    } while (false);
 
     if (w == nullptr) { // Attempt to instantiate base class of promoted/custom widgets
         const QString baseClassName = d->customWidgetBaseClass(widgetName);
@@ -205,36 +194,15 @@ QWidget *QFormBuilder::createWidget(const QString &widgetName, QWidget *parentWi
 */
 QLayout *QFormBuilder::createLayout(const QString &layoutName, QObject *parent, const QString &name)
 {
-    QLayout *l = nullptr;
-
-    QWidget *parentWidget = qobject_cast<QWidget*>(parent);
-    QLayout *parentLayout = qobject_cast<QLayout*>(parent);
-
+    auto *parentWidget = qobject_cast<QWidget*>(parent);
+    auto *parentLayout = qobject_cast<QLayout*>(parent);
     Q_ASSERT(parentWidget || parentLayout);
 
-#define DECLARE_WIDGET(W, C)
-#define DECLARE_COMPAT_WIDGET(W, C)
-
-#define DECLARE_LAYOUT(L, C) \
-    if (layoutName == QLatin1StringView(#L)) { \
-        Q_ASSERT(l == 0); \
-        l = parentLayout \
-            ? new L() \
-            : new L(parentWidget); \
-    }
-
-#include "widgets.table"
-
-#undef DECLARE_LAYOUT
-#undef DECLARE_COMPAT_WIDGET
-#undef DECLARE_WIDGET
-
-    if (l) {
+    QLayout *l = createLayoutInstance(layoutName, parentLayout ? nullptr : parentWidget);
+    if (l)
         l->setObjectName(name);
-    } else {
+    else
         qWarning() << QCoreApplication::translate("QFormBuilder", "The layout type `%1' is not supported.").arg(layoutName);
-    }
-
     return l;
 }
 
@@ -296,7 +264,7 @@ void QFormBuilder::createConnections(DomConnections *ui_connections, QWidget *wi
         sig.prepend("2");
         QByteArray sl = c->elementSlot().toUtf8();
         sl.prepend("1");
-        QObject::connect(sender, sig, receiver, sl);
+        QObject::connect(sender, sig.constData(), receiver, sl.constData());
     }
 }
 
@@ -400,12 +368,12 @@ void QFormBuilder::setPluginPath(const QStringList &pluginPaths)
 static void insertPlugins(QObject *o, QMap<QString, QDesignerCustomWidgetInterface*> *customWidgets)
 {
     // step 1) try with a normal plugin
-    if (QDesignerCustomWidgetInterface *iface = qobject_cast<QDesignerCustomWidgetInterface *>(o)) {
+    if (auto *iface = qobject_cast<QDesignerCustomWidgetInterface *>(o)) {
         customWidgets->insert(iface->name(), iface);
         return;
     }
     // step 2) try with a collection of plugins
-    if (QDesignerCustomWidgetCollectionInterface *c = qobject_cast<QDesignerCustomWidgetCollectionInterface *>(o)) {
+    if (auto *c = qobject_cast<QDesignerCustomWidgetCollectionInterface *>(o)) {
         const auto &collectionCustomWidgets = c->customWidgets();
         for (QDesignerCustomWidgetInterface *iface : collectionCustomWidgets)
             customWidgets->insert(iface->name(), iface);
@@ -477,7 +445,7 @@ void QFormBuilder::applyProperties(QObject *o, const QList<DomProperty*> &proper
             // ### special-casing for Line (QFrame) -- try to fix me
             o->setProperty("frameShape", v); // v is of QFrame::Shape enum
         } else {
-            o->setProperty(attributeName.toUtf8(), v);
+            o->setProperty(attributeName.toUtf8().constData(), v);
         }
     }
 }

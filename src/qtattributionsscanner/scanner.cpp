@@ -24,9 +24,16 @@ static void missingPropertyWarning(const QString &filePath, const QString &prope
                                 QDir::toNativeSeparators(filePath), property)) << std::endl;
 }
 
-static bool validatePackage(Package &p, const QString &filePath, Checks checks, LogLevel logLevel)
+bool validatePackage(Package &p, Checks checks, LogLevel logLevel)
 {
+    const auto &filePath = p.filePath;
     bool validPackage = true;
+
+    if (filePath.isEmpty()) {
+        std::cerr << qPrintable(tr("The origin file of package '%1' was not recorded.")
+            .arg(p.id));
+        return false;
+    }
 
     if (p.qtParts.isEmpty())
         p.qtParts << u"libs"_s;
@@ -44,7 +51,13 @@ static bool validatePackage(Package &p, const QString &filePath, Checks checks, 
         if (logLevel != SilentLog)
             missingPropertyWarning(filePath, u"Id"_s);
         validPackage = false;
+    } else if (!p.id.isLower() || p.id.contains(' '_L1)) {
+        if (logLevel != SilentLog)
+            std::cerr << qPrintable(tr("File %1: Value of 'Id' must be in lowercase and without spaces.")
+                                        .arg(QDir::toNativeSeparators(filePath))) << std::endl;
+        validPackage = false;
     }
+
     if (p.license.isEmpty()) {
         if (logLevel != SilentLog)
             missingPropertyWarning(filePath, u"License"_s);
@@ -80,6 +93,15 @@ static bool validatePackage(Package &p, const QString &filePath, Checks checks, 
             }
             validPackage = false;
         }
+    }
+
+    if (p.origin == Package::Origin::Provisioned && !p.files.isEmpty()) {
+        std::cerr << qPrintable(tr("File %1: Do not set property 'Files' if property "
+                                   "'Origin' is set to 'Provisioned'.")
+                                        .arg(QDir::toNativeSeparators(filePath)))
+                  << std::endl;
+
+        validPackage = false;
     }
 
     if (!(checks & Check::Paths))
@@ -190,21 +212,27 @@ static bool autoDetectLicenseFiles(Package &p)
 {
     const QString licensesDirPath = locateLicensesDir(p.path);
     const QStringList licenseIds = extractLicenseIdsFromSPDXExpression(p.licenseId);
-    if (!licenseIds.isEmpty() && licensesDirPath.isEmpty()) {
-        std::cerr << qPrintable(tr("LICENSES directory could not be located.")) << std::endl;
-        return false;
-    }
 
     bool success = true;
     QDir licensesDir(licensesDirPath);
+    QDir licensesDirLocal = p.path;
     for (const QString &id : licenseIds) {
         QString fileName = id + u".txt";
-        if (licensesDir.exists(fileName)) {
+        QString fileNameLocal = u"LICENSE." + id + u".txt";
+
+        if (licensesDirLocal.exists(fileNameLocal)) {
+            p.licenseFiles.append(licensesDirLocal.filePath(fileNameLocal));
+        } else if (licensesDir.exists(fileName)) {
             p.licenseFiles.append(licensesDir.filePath(fileName));
         } else {
-            std::cerr << qPrintable(tr("Expected license file not found: %1").arg(
-                                        QDir::toNativeSeparators(licensesDir.filePath(fileName))))
+            std::cerr << qPrintable(tr("Missing expected license file:")) << std::endl;
+            std::cerr << qPrintable(QDir::toNativeSeparators(licensesDirLocal.filePath(fileNameLocal)))
                       << std::endl;
+            if (!licensesDirPath.isEmpty()) {
+                std::cerr << qPrintable(tr("or\n %1").arg(
+                                            QDir::toNativeSeparators(licensesDir.filePath(fileName))))
+                          << std::endl;
+            }
             success = false;
         }
     }
@@ -239,11 +267,12 @@ static bool handleStringOrStringArrayJsonKey(QStringList &outList, const QString
 
 // Transforms a JSON object into a Package object
 static std::optional<Package> readPackage(const QJsonObject &object, const QString &filePath,
-                                          Checks checks, LogLevel logLevel)
+                                          LogLevel logLevel)
 {
     Package p;
     bool validPackage = true;
     const QString directory = QFileInfo(filePath).absolutePath();
+    p.filePath = QFileInfo(filePath).absoluteFilePath();
     p.path = directory;
 
     for (auto iter = object.constBegin(); iter != object.constEnd(); ++iter) {
@@ -275,7 +304,8 @@ static std::optional<Package> readPackage(const QJsonObject &object, const QStri
             } else {
                 if (logLevel != SilentLog) {
                     std::cerr << qPrintable(tr("File %1: Expected JSON array of strings as value "
-                                               "of Files."));
+                                               "of Files.").arg(QDir::toNativeSeparators(filePath)))
+                              << std::endl;
                     validPackage = false;
                     continue;
                 }
@@ -287,6 +317,19 @@ static std::optional<Package> readPackage(const QJsonObject &object, const QStri
             // unique, albeit some linters may kvetch.
         } else if (key == "Id"_L1) {
             p.id = value;
+        } else if (key == "Origin"_L1) {
+            if (value == "InSource"_L1) {
+                p.origin = Package::Origin::InSource;
+            } else if (value == "Provisioned"_L1) {
+                p.origin = Package::Origin::Provisioned;
+            } else {
+                std::cerr << qPrintable(tr("File %1: Expected either 'InSource' or 'Provisioned'"
+                                           " as value of 'Origin'.")
+                                                .arg(QDir::toNativeSeparators(filePath)))
+                          << std::endl;
+                validPackage = false;
+                continue;
+            }
         } else if (key == "Homepage"_L1) {
             p.homepage = value;
         } else if (key == "Version"_L1) {
@@ -383,6 +426,41 @@ static std::optional<Package> readPackage(const QJsonObject &object, const QStri
         }
     }
 
+    // Replace $<VERSION> and $<VERSION_DASHED> in string values
+    {
+        const QString versionVar = u"$<VERSION>"_s;
+        const QString versionDashedVar = u"$<VERSION_DASHED>"_s;
+        auto replaceInString = [&](QString &s) {
+            if (s.contains(versionVar) || s.contains(versionDashedVar)) {
+                if (p.version.isEmpty()) {
+                    if (logLevel != SilentLog) {
+                        std::cerr << qPrintable(
+                                tr("File %1: $<VERSION> used but 'Version' is not set.")
+                                        .arg(QDir::toNativeSeparators(filePath)))
+                                  << std::endl;
+                    }
+                    validPackage = false;
+                    return;
+                }
+                s.replace(versionVar, p.version);
+                s.replace(versionDashedVar,
+                          QString(p.version).replace(u'.', u'-'));
+            }
+        };
+        auto replaceInList = [&](QStringList &list) {
+            for (QString &s : list)
+                replaceInString(s);
+        };
+        replaceInString(p.name);
+        replaceInString(p.homepage);
+        replaceInString(p.downloadLocation);
+        replaceInString(p.description);
+        replaceInString(p.qtUsage);
+        replaceInString(p.packageComment);
+        replaceInList(p.cpeList);
+        replaceInList(p.purlList);
+    }
+
     if (!p.copyrightFile.isEmpty()) {
         QFile file(p.copyrightFile);
         if (!file.open(QIODevice::ReadOnly)) {
@@ -410,7 +488,7 @@ static std::optional<Package> readPackage(const QJsonObject &object, const QStri
         p.licenseFilesContents << QString::fromUtf8(file.readAll()).trimmed();
     }
 
-    if (!validatePackage(p, filePath, checks, logLevel) || !validPackage)
+    if (!validPackage)
         return std::nullopt;
 
     return p;
@@ -460,6 +538,7 @@ static Package parseChromiumFile(QFile &file, const QString &filePath, LogLevel 
             : fields["Name"_L1];
     QString version = fields[u"Version"_s];
 
+    p.filePath = QFileInfo(filePath).absoluteFilePath();
     p.id =  u"chromium-"_s + shortName.toLower().replace(QChar::Space, u"-"_s);
     p.name = fields[u"Name"_s];
     if (version != QLatin1Char('0')) // "0" : not applicable
@@ -487,12 +566,35 @@ static Package parseChromiumFile(QFile &file, const QString &filePath, LogLevel 
     }
 
     // let's ignore warnings regarding Chromium files for now
-    Q_UNUSED(validatePackage(p, filePath, {}, logLevel));
+    Q_UNUSED(validatePackage(p, {}, logLevel));
 
     return p;
 }
 
-std::optional<QList<Package>> readFile(const QString &filePath, Checks checks, LogLevel logLevel)
+struct CursorPosition
+{
+    int line = -1;
+    int column = -1;
+};
+
+static CursorPosition mapFromOffset(const QByteArray &content, int offset)
+{
+    CursorPosition pos{ 1, 1 };
+    for (int i = 0; i < content.size(); ++i) {
+        if (i == offset)
+            return pos;
+
+        if (content[i] == '\n') {
+            pos.line++;
+            pos.column = 1;
+        } else {
+            pos.column++;
+        }
+    }
+    return CursorPosition();
+}
+
+std::optional<QList<Package>> readFile(const QString &filePath, LogLevel logLevel)
 {
     QList<Package> packages;
     bool errorsFound = false;
@@ -511,19 +613,24 @@ std::optional<QList<Package>> readFile(const QString &filePath, Checks checks, L
 
     if (filePath.endsWith(".json"_L1)) {
         QJsonParseError jsonParseError;
-        const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &jsonParseError);
+        const QByteArray content = file.readAll();
+        const QJsonDocument document = QJsonDocument::fromJson(content, &jsonParseError);
         if (document.isNull()) {
-            if (logLevel != SilentLog)
-                std::cerr << qPrintable(tr("Could not parse file %1: %2").arg(
-                                            QDir::toNativeSeparators(file.fileName()),
-                                            jsonParseError.errorString()))
+            if (logLevel != SilentLog) {
+                const CursorPosition pos = mapFromOffset(content, jsonParseError.offset);
+                std::cerr << qPrintable(tr("Could not parse file %1: %2 at line %3, column %4")
+                                                .arg(QDir::toNativeSeparators(file.fileName()),
+                                                     jsonParseError.errorString(),
+                                                     QString::number(pos.line),
+                                                     QString::number(pos.column)))
                           << std::endl;
+            }
             return std::nullopt;
         }
 
         if (document.isObject()) {
             std::optional<Package> p =
-                    readPackage(document.object(), file.fileName(), checks, logLevel);
+                    readPackage(document.object(), file.fileName(), logLevel);
             if (p) {
                 packages << *p;
             } else {
@@ -535,7 +642,7 @@ std::optional<QList<Package>> readFile(const QString &filePath, Checks checks, L
                 QJsonValue value = array.at(i);
                 if (value.isObject()) {
                     std::optional<Package> p =
-                            readPackage(value.toObject(), file.fileName(), checks, logLevel);
+                            readPackage(value.toObject(), file.fileName(), logLevel);
                     if (p) {
                         packages << *p;
                     } else {
@@ -576,7 +683,7 @@ std::optional<QList<Package>> readFile(const QString &filePath, Checks checks, L
 }
 
 std::optional<QList<Package>> scanDirectory(const QString &directory, InputFormats inputFormats,
-                                            Checks checks, LogLevel logLevel)
+                                            LogLevel logLevel)
 {
     QDir dir(directory);
     QList<Package> packages;
@@ -597,13 +704,13 @@ std::optional<QList<Package>> scanDirectory(const QString &directory, InputForma
     for (const QFileInfo &info : entries) {
         if (info.isDir()) {
             std::optional<QList<Package>> ps =
-                    scanDirectory(info.filePath(), inputFormats, checks, logLevel);
+                    scanDirectory(info.filePath(), inputFormats, logLevel);
             if (!ps)
                 errorsFound = true;
             else
                 packages += *ps;
         } else {
-            std::optional p = readFile(info.filePath(), checks, logLevel);
+            std::optional p = readFile(info.filePath(), logLevel);
             if (!p)
                 errorsFound = true;
             else

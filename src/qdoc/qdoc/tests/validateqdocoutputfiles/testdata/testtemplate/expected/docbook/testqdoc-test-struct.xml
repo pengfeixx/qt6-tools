@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <db:article xmlns:db="http://docbook.org/ns/docbook" xmlns:xlink="http://www.w3.org/1999/xlink" version="5.2" xml:lang="en">
 <db:info>
-<db:title></db:title>
-<db:productname>TestTemplate</db:productname>
+<db:title/>
+<db:productname>Qt</db:productname>
 <db:titleabbrev>TestTemplate Reference Documentation</db:titleabbrev>
 <db:abstract>
 <db:para>Templated struct.</db:para>
@@ -13,7 +13,7 @@
 <db:varlistentry>
 <db:term>Header</db:term>
 <db:listitem>
-<db:para>Struct</db:para>
+<db:para>testcpp.h</db:para>
 </db:listitem>
 </db:varlistentry>
 <db:varlistentry>
@@ -38,5 +38,6 @@
 </db:variablelist>
 <db:section xml:id="details">
 <db:title>Detailed Description</db:title>
+<db:para><db:code role="parameter">D</db:code> is the first type parameter, <db:code role="parameter">T</db:code> is the second.</db:para>
 </db:section>
 </db:article>

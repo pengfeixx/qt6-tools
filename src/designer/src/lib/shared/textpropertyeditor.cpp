@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #include "textpropertyeditor_p.h"
 #include "propertylineedit_p.h"
@@ -205,6 +206,13 @@ namespace qdesigner_internal {
         setTextPropertyValidationMode(validationMode);
     }
 
+    TextPropertyEditor::~TextPropertyEditor()
+    {
+        // QTBUG-143311: Slots may be triggered after deletion in conjunction
+        // with deferred delete when switching between inline editors in different forms.
+        m_lineEdit->disconnect(this);
+    }
+
     void TextPropertyEditor::setTextPropertyValidationMode(TextPropertyValidationMode vm) {
         m_validationMode = vm;
         m_lineEdit->setWantNewLine(multiLine(m_validationMode));
@@ -237,9 +245,9 @@ namespace qdesigner_internal {
         case ValidationURL: {
             static const QStringList urlCompletions = {
                 u"about:blank"_s,
-                u"http://"_s,
-                u"http://www."_s,
-                u"http://qt.io"_s,
+                u"https://"_s,
+                u"https://www."_s,
+                u"https://qt.io"_s,
                 u"file://"_s,
                 u"ftp://"_s,
                 u"data:"_s,

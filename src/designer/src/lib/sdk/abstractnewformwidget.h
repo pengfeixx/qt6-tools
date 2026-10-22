@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #ifndef ABSTRACTNEWFORMWIDGET_H
 #define ABSTRACTNEWFORMWIDGET_H
@@ -17,7 +18,7 @@ class QDESIGNER_SDK_EXPORT QDesignerNewFormWidgetInterface : public QWidget
     Q_OBJECT
 public:
     explicit QDesignerNewFormWidgetInterface(QWidget *parent = nullptr);
-    virtual ~QDesignerNewFormWidgetInterface();
+    ~QDesignerNewFormWidgetInterface() override;
 
     virtual bool hasCurrentTemplate() const = 0;
     virtual QString currentTemplate(QString *errorMessage = nullptr) = 0;

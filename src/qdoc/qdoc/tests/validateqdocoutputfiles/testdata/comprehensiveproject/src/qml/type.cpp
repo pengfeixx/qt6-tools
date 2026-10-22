@@ -33,6 +33,9 @@
     \inqmlmodule QDoc.Test
     \brief A QML type documented in a .cpp file.
     \meta status { <Work In Progress> }
+
+    Test links to a \l{duplicate}{property} and a
+    \l[attached]{duplicate}{attached property} with the same name.
 */
 
 /*!
@@ -71,6 +74,24 @@
 */
 
 /*!
+    \property TestQDoc::TestDerived::duplicate
+*/
+
+/*!
+    \qmlproperty int Type::duplicate
+    \brief A read-only property with a corresponding attached property.
+
+    This is shadowed by the attached \l[attached]{duplicate} property.
+*/
+
+/*!
+    \qmlattachedproperty int Type::duplicate
+    \brief A read-only, attached property with a corresponding property.
+
+    This shadows the regular \l{duplicate} property.
+*/
+
+/*!
     \qmlproperty int Type::group.first
     \qmlproperty int Type::group.second
     \qmlproperty int Type::group.third
@@ -98,10 +119,33 @@
 */
 
 /*!
-    \qmlmethod Type::enable()
-    \qmlmethod Type::disable()
+    \qmlmethod void Type::enable()
+    \qmlmethod void Type::disable()
 
     Enables or disables this type.
+*/
+
+/*!
+    \qmlmethod void Type::setType(Type.SomeType newType)
+
+    Sets the type to \a newType. This tests enum parameter linking
+    using dot notation.
+
+    \sa type
+*/
+
+/*!
+    \qmlmethod void Type::configureWithType (Type::SomeType typeParam)
+
+    Configures the type using \a typeParam. This tests enum parameter linking
+    using C++ namespace notation.
+
+    \sa type
+*/
+
+/*!
+    \qmlmethod Type::missingReturnType()
+    QDoc won't like this.
 */
 
 /*!
@@ -117,7 +161,7 @@
 */
 
 /*!
-    \qmlmethod Type::deprecatedMethod()
+    \qmlmethod list<int> Type::deprecatedMethod()
 
     \deprecated [6.2] This method has no replacement.
 
@@ -126,8 +170,12 @@
 */
 
 /*!
-    \qmlmethod Type::futureDeprecated()
+    \qmlmethod void Type::futureDeprecated()
     \deprecated [6.3] Use something else instead.
 
     This is a method that's marked for deprecation in a future version.
+*/
+
+/*!
+    \qmlmethod int Type::justPlainWrong(oops
 */

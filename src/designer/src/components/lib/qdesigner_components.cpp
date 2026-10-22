@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #include <QtDesigner/QDesignerComponents>
 
@@ -32,12 +33,6 @@
 #include <QtCore/qfile.h>
 #include <QtCore/qfileinfo.h>
 
-#define INIT_PLUGIN_INSTANCE(PLUGIN) \
-    do { \
-        Static##PLUGIN##PluginInstance instance; \
-        Q_UNUSED(instance); \
-    } while (0)
-
 Q_IMPORT_PLUGIN(SignalSlotEditorPlugin)
 Q_IMPORT_PLUGIN(BuddyEditorPlugin)
 Q_IMPORT_PLUGIN(TabOrderEditorPlugin)
@@ -48,19 +43,6 @@ static void initResources()
     Q_INIT_RESOURCE(formeditor);
     Q_INIT_RESOURCE(widgetbox);
     Q_INIT_RESOURCE(propertyeditor);
-}
-
-
-static void initInstances()
-{
-    static bool plugins_initialized = false;
-
-    if (!plugins_initialized) {
-        INIT_PLUGIN_INSTANCE(SignalSlotEditorPlugin);
-        INIT_PLUGIN_INSTANCE(BuddyEditorPlugin);
-        INIT_PLUGIN_INSTANCE(TabOrderEditorPlugin);
-        plugins_initialized = true;
-    }
 }
 
 QT_BEGIN_NAMESPACE
@@ -114,7 +96,6 @@ QDesignerFormEditorInterface *
     QDesignerComponents::createFormEditorWithPluginPaths(const QStringList &pluginPaths,
                                                          QObject *parent)
 {
-    initInstances();
     return new qdesigner_internal::FormEditor(pluginPaths, parent);
 }
 

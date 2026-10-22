@@ -24,10 +24,14 @@
     \li \l {c-command} {\\c}
     \li \l {caption-command} {\\caption}
     \li \l {class-command} {\\class}
+    \li \l {cmakecomponent-command} {\\cmakecomponent}
+    \li \l {cmakepackage-command} {\\cmakepackage}
+    \li \l {cmaketargetitem-command} {\\cmaketargetitem}
     \li \l {code-command} {\\code}
     \li \l {codeline-command} {\\codeline}
     \li \l {compares-command} {\\compares}
     \li \l {compareswith-command} {\\compareswith}
+    \li \l {concept-command} {\\concept}
     \li \l {deprecated-command} {\\deprecated}
     \li \l {default-command} {\\default}
     \li \l {details-command} {\\details}
@@ -40,7 +44,6 @@
     \li \l {example-command} {\\example}
     \li \l {externalpage-command} {\\externalpage}
     \li \l {fn-command} {\\fn}
-    \li \l {footnote-command} {\\footnote}
     \li \l {generatelist-command} {\\generatelist}
     \li \l {group-command} {\\group}
     \li \l {header-command} {\\header}
@@ -72,6 +75,7 @@
     \li \l {noautolist-command} {\\noautolist}
     \li \l {nonreentrant-command} {\\nonreentrant}
     \li \l {note-command} {\\note}
+    \li \l {notranslate-command} {\\notranslate}
     \li \l {li-command} {\\o} (deprecated, use \\li)
     \li \l {omit-command} {\\omit}
     \li \l {omitvalue-command} {\\omitvalue}
@@ -85,17 +89,21 @@
     \li \l {property-command} {\\property}
     \li \l {qml-command} {\\qml}
     \li \l {qmlabstract-command} {\\qmlabstract}
+    \li \l {qmlattachedmethod-command} {\\qmlattachedmethod}
     \li \l {qmlattachedproperty-command} {\\qmlattachedproperty}
     \li \l {qmlattachedsignal-command} {\\qmlattachedsignal}
     \li \l {qmlvaluetype-command} {\\qmlvaluetype}
     \li \l {qmlclass-command} {\\qmlclass} (deprecated, use \\qmltype)
     \li \l {qmldefault-command} {\\qmldefault}
+    \li \l {qmlenum-command} {\\qmlenum}
     \li \qdoccmd qmlenumeratorsfrom
     \li \l {qmltype-command} {\\qmltype}
+    \li \l {qmlsingletontype-command} {\\qmlsingletontype}
     \li \l {qmlmethod-command} {\\qmlmethod}
     \li \l {qmlproperty-command} {\\qmlproperty}
     \li \l {qmlsignal-command} {\\qmlsignal}
     \li \l {qmlmodule-command} {\\qmlmodule}
+    \li \l {qmluncreatabletype-command} {\\qmluncreatabletype}
     \li \l {qtcmakepackage-command} {\\qtcmakepackage}
     \li \l {qtcmaketargetitem-command} {\\qtcmaketargetitem}
     \li \l {quotation-command} {\\quotation}
@@ -125,11 +133,12 @@
     \li \l {subtitle-command} {\\subtitle}
     \li \l {sup-command} {\\sup}
     \li \l {table-command} {\\table}
-    \li \l {tableofcontents-command} {\\tableofcontents}
     \li \l {target-command} {\\target}
     \li \l {threadsafe-command} {\\threadsafe}
     \li \l {title-command} {\\title}
     \li \qdoccmd tm
+    \li \l {toc-command} {\\toc}
+    \li \l {tocentry-command} {\\tocentry}
     \li \l {tt-command} {\\tt}
     \li \l {typealias-command} {\\typealias}
     \li \l {typedef-command} {\\typedef}

@@ -1,5 +1,6 @@
 // Copyright (C) 2020 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "qoptionswidget_p.h"
 
@@ -96,7 +97,7 @@ void QOptionsWidget::setOptions(const QStringList &validOptions, const QStringLi
     for (const QString &option : validSelectedOptions)
         appendItem(option, true, true);
 
-    for (const QString &option : m_invalidOptions)
+    for (const QString &option : std::as_const(m_invalidOptions))
         appendItem(option, false, true);
 
     if ((validSelectedOptions.size() + m_invalidOptions.size()) && validUnselectedOptions.size())
@@ -133,7 +134,7 @@ void QOptionsWidget::setInvalidOptionText(const QString &text)
     m_invalidOptionText = text;
 
     // update GUI
-    for (const QString &option : m_invalidOptions)
+    for (const QString &option : std::as_const(m_invalidOptions))
         m_optionToItem.value(option)->setText(optionText(option, false));
 }
 

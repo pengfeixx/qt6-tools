@@ -25,15 +25,6 @@ class QIODevice;
 class ConversionData
 {
 public:
-    ConversionData() :
-        m_verbose(false),
-        m_ignoreUnfinished(false),
-        m_sortContexts(false),
-        m_noUiLines(false),
-        m_idBased(false),
-        m_saveMode(SaveEverything)
-    {}
-
     // tag manipulation
     const QStringList &dropTags() const { return m_dropTags; }
     QStringList &dropTags() { return m_dropTags; }
@@ -41,9 +32,10 @@ public:
     bool isVerbose() const { return m_verbose; }
     bool ignoreUnfinished() const { return m_ignoreUnfinished; }
     bool sortContexts() const { return m_sortContexts; }
+    bool sortMessages() const { return m_sortMessages; }
 
     void appendError(const QString &error) { m_errors.append(error); }
-    QString error() const { return m_errors.isEmpty() ? QString() : m_errors.join(QLatin1Char('\n')) + QLatin1Char('\n'); }
+    QString error() const { return m_errors.isEmpty() ? QString() : m_errors.join(u'\n') + u'\n'; }
     QStringList errors() const { return  m_errors; }
     void clearErrors() { m_errors.clear(); }
 
@@ -53,7 +45,6 @@ public:
     QString m_unTrPrefix; // QM specific
     QString m_sourceFileName;
     QString m_targetFileName;
-    QString m_compilationDatabaseDir;
     QVector<QRegularExpression> m_excludes;
     QDir m_sourceDir;
     QDir m_targetDir; // FIXME: TS specific
@@ -62,13 +53,12 @@ public:
     QStringList m_includePath;
     QStringList m_dropTags;  // tags to be dropped
     QStringList m_errors;
-    bool m_verbose;
-    bool m_ignoreUnfinished;
-    bool m_sortContexts;
-    bool m_noUiLines;
-    bool m_idBased;
-    TranslatorSaveMode m_saveMode;
-    QStringList m_rootDirs;
+    bool m_verbose = false;
+    bool m_ignoreUnfinished = false;
+    bool m_sortContexts = false;
+    bool m_sortMessages = false;
+    bool m_noUiLines = false;
+    TranslatorSaveMode m_saveMode = SaveEverything;
 };
 
 class TMMKey {
@@ -80,9 +70,9 @@ public:
     QString context, source, comment;
 };
 Q_DECLARE_TYPEINFO(TMMKey, Q_RELOCATABLE_TYPE);
-inline size_t qHash(const TMMKey &key)
+inline size_t qHash(const TMMKey &key, size_t seed = 0)
 {
-    return qHash(key.context) ^ qHash(key.source) ^ qHash(key.comment);
+    return qHash(key.context, seed) ^ qHash(key.source, seed) ^ qHash(key.comment, seed);
 }
 
 class Translator
@@ -114,6 +104,7 @@ public:
     void dropUiLines();
     void makeFileNamesAbsolute(const QDir &originalPath);
     bool translationsExist() const;
+    bool unfinishedTranslationsExist() const;
 
     using DuplicateEntries = QHash<int, QVector<int>>;
     struct Duplicates
@@ -149,8 +140,10 @@ public:
     const TranslatorMessage &constMessage(int i) const { return m_messages.at(i); }
     void dump() const;
 
+    void appendDependencies(const QStringList &dependencies);
     void setDependencies(const QStringList &dependencies) { m_dependencies = dependencies; }
     QStringList dependencies() const { return m_dependencies; }
+    void satisfyDependency(const QString &file, const QString &format);
 
     // additional file format specific data
     // note: use '<fileformat>:' as prefix for file format specific members,
@@ -179,10 +172,8 @@ public:
     static void registerFileFormat(const FileFormat &format);
     static QList<FileFormat> &registeredFileFormats();
 
-    enum {
-        TextVariantSeparator = 0x2762, // some weird character nobody ever heard of :-D
-        BinaryVariantSeparator = 0x9c // unicode "STRING TERMINATOR"
-    };
+    static constexpr QChar TextVariantSeparator{0x2762}; // some weird character nobody ever heard of :-D
+    static constexpr QChar BinaryVariantSeparator{0x9c}; // unicode "STRING TERMINATOR"
 
 private:
     void insert(int idx, const TranslatorMessage &msg);
@@ -210,13 +201,17 @@ private:
     ExtraData m_extra;
 
     mutable bool m_indexOk;
-    mutable QHash<QString, int> m_ctxCmtIdx;
     mutable QHash<QString, int> m_idMsgIdx;
     mutable QHash<TMMKey, int> m_msgIdx;
 };
 
 bool getNumerusInfo(QLocale::Language language, QLocale::Territory territory, QByteArray *rules,
                     QStringList *forms, const char **gettextRules);
+
+bool getCountNeed(QLocale::Language lang, QLocale::Territory territory, QList<bool> &countRefNeeds,
+                  QStringList *forms);
+
+QString friendlyString(const QString &str);
 
 QString getNumerusInfoString();
 

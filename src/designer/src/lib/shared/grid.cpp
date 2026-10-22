@@ -1,7 +1,9 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #include "grid_p.h"
+#include "iconloader_p.h"
 
 #include <QtCore/qlist.h>
 #include <QtCore/qstring.h>
@@ -95,7 +97,8 @@ void Grid::paint(QWidget *widget, QPaintEvent *e) const
 
 void Grid::paint(QPainter &p, const QWidget *widget, QPaintEvent *e) const
 {
-    p.setPen(widget->palette().dark().color());
+    const auto &palette = widget->palette();
+    p.setPen(isDarkMode() ? palette.light().color() : palette.dark().color());
 
     if (m_visible) {
         const int xstart = (e->rect().x() / m_deltaX) * m_deltaX;

@@ -6,6 +6,7 @@
 
 #include "config.h"
 #include "examplenode.h"
+#include "genustypes.h"
 #include "propertynode.h"
 #include "text.h"
 #include "tree.h"
@@ -27,7 +28,8 @@ enum FindFlag {
     SearchBaseClasses = 0x1,
     SearchEnumValues = 0x2,
     TypesOnly = 0x4,
-    IgnoreModules = 0x8
+    IgnoreModules = 0x8,
+    QmlAttachedProperties = 0x10
 };
 
 class QDocForest
@@ -57,7 +59,7 @@ private:
     }
 
     const Node *findNode(const QStringList &path, const Node *relative, int findFlags,
-                         Node::Genus genus)
+                         Genus genus)
     {
         for (const auto *tree : searchOrder()) {
             const Node *n = tree->findNode(path, relative, findFlags, genus);
@@ -99,14 +101,14 @@ private:
     }
 
     const FunctionNode *findFunctionNode(const QStringList &path, const Parameters &parameters,
-                                         const Node *relative, Node::Genus genus);
-    const Node *findNodeForTarget(QStringList &targetPath, const Node *relative, Node::Genus genus,
-                                  QString &ref);
+                                         const Node *relative, Genus genus);
+    const Node *findNodeForTarget(QStringList &targetPath, const Node *relative, Genus genus,
+                                  QString &ref, int findFlags = 0);
 
-    const Node *findTypeNode(const QStringList &path, const Node *relative, Node::Genus genus)
+    const Node *findTypeNode(const QStringList &path, const Node *relative, Genus genus)
     {
         int flags = SearchBaseClasses | SearchEnumValues | TypesOnly;
-        if (relative && genus == Node::DontCare && relative->genus() != Node::DOC)
+        if (relative && genus == Genus::DontCare && relative->genus() != Genus::DOC)
             genus = relative->genus();
         for (const auto *tree : searchOrder()) {
             const Node *n = tree->findNode(path, relative, flags, genus);
@@ -127,23 +129,44 @@ private:
         return nullptr;
     }
 
-    const CollectionNode *getCollectionNode(const QString &name, Node::NodeType type)
+    const CollectionNode *getCollectionNode(const QString &name, NodeType type)
     {
         for (auto *tree : searchOrder()) {
-            const CollectionNode *cn = tree->getCollection(name, type);
-            if (cn)
+            if (const CollectionNode *cn = tree->getCollection(name, type))
                 return cn;
         }
         return nullptr;
     }
 
-    QmlTypeNode *lookupQmlType(const QString &name)
+    // Mutating variant for passes that legitimately update collection
+    // membership (such as the concept-users reverse-index pass). Kept
+    // separate from getCollectionNode() so read-only callers keep
+    // their const contract and mutation intent is visible at the call
+    // site.
+    CollectionNode *findMutableCollectionNode(const QString &name, NodeType type)
+    {
+        for (auto *tree : searchOrder()) {
+            if (CollectionNode *cn = tree->getCollection(name, type))
+                return cn;
+        }
+        return nullptr;
+    }
+
+    QmlTypeNode *lookupQmlType(const QString &name, const Node *relative = nullptr)
     {
         for (const auto *tree : searchOrder()) {
-            QmlTypeNode *qcn = tree->lookupQmlType(name);
+            QmlTypeNode *qcn = tree->lookupQmlType(name, relative);
             if (qcn)
                 return qcn;
         }
+        return nullptr;
+    }
+
+    [[nodiscard]] Aggregate *findRelatesNode(const QStringList &path)
+    {
+        for (auto *tree : searchOrder())
+            if (auto *aggregate = tree->findRelatesNode(path))
+                return aggregate;
         return nullptr;
     }
 
@@ -176,10 +199,12 @@ public:
     const CNMap &groups() { return primaryTree()->groups(); }
     const CNMap &modules() { return primaryTree()->modules(); }
     const CNMap &qmlModules() { return primaryTree()->qmlModules(); }
+    const CNMap &concepts() { return primaryTree()->concepts(); }
 
     CollectionNode *addGroup(const QString &name) { return primaryTree()->addGroup(name); }
     CollectionNode *addModule(const QString &name) { return primaryTree()->addModule(name); }
     CollectionNode *addQmlModule(const QString &name) { return primaryTree()->addQmlModule(name); }
+    CollectionNode *addConcept(const QString &name) { return primaryTree()->addConcept(name); }
 
     CollectionNode *addToGroup(const QString &name, Node *node)
     {
@@ -197,12 +222,12 @@ public:
     void addExampleNode(ExampleNode *n) { primaryTree()->addExampleNode(n); }
     ExampleNodeMap &exampleNodeMap() { return primaryTree()->exampleNodeMap(); }
 
-    QmlTypeNode *findQmlType(const QString &name)
+    QmlTypeNode *findQmlType(const QString &name, const Node *relative = nullptr)
     {
-        return m_forest.lookupQmlType(name);
+        return m_forest.lookupQmlType(name, relative);
     }
-    QmlTypeNode *findQmlType(const QString &qmid, const QString &name);
-    QmlTypeNode *findQmlType(const ImportRec &import, const QString &name);
+    QmlTypeNode *findQmlType(const QString &qmid, const QString &name, const Node *relative = nullptr);
+    QmlTypeNode *findQmlType(const ImportRec &import, const QString &name, const Node *relative = nullptr);
     QmlTypeNode *findQmlTypeInPrimaryTree(const QString &qmid, const QString &name);
 
     static NodeMultiMap &obsoleteClasses() { return s_obsoleteClasses; }
@@ -246,6 +271,12 @@ public:
     const NodeMultiMap &getQmlTypeMap(const QString &key);
     const NodeMultiMap &getSinceMap(const QString &key);
 
+    [[nodiscard]] Aggregate *findRelatesNode(const QStringList &path)
+    {
+        return m_forest.findRelatesNode(path);
+    }
+
+
     /*******************************************************************
       Many of these will be either eliminated or replaced.
     ********************************************************************/
@@ -256,20 +287,13 @@ public:
         primaryTree()->insertTarget(name, title, type, node, priority);
     }
 
-    /*******************************************************************
-      The functions declared below are called for the current tree only.
-    ********************************************************************/
-    Aggregate *findRelatesNode(const QStringList &path)
-    {
-        return primaryTree()->findRelatesNode(path);
-    }
     /*******************************************************************/
 
     /*****************************************************************************
       This function can handle parameters enclosed in '[' ']' (domain and genus).
     ******************************************************************************/
     const Node *findNodeForAtom(const Atom *atom, const Node *relative, QString &ref,
-                                Node::Genus genus = Node::DontCare);
+                                Genus genus = Genus::DontCare);
     /*******************************************************************/
 
     /*******************************************************************
@@ -278,9 +302,16 @@ public:
     ClassNode *findClassNode(const QStringList &path) { return m_forest.findClassNode(path); }
     Node *findNodeForInclude(const QStringList &path) { return m_forest.findNodeForInclude(path); }
     const FunctionNode *findFunctionNode(const QString &target, const Node *relative,
-                                         Node::Genus genus);
-    const Node *findTypeNode(const QString &type, const Node *relative, Node::Genus genus);
+                                         Genus genus);
+    const Node *findTypeNode(const QString &type, const Node *relative, Genus genus);
+    const CollectionNode *findConceptNode(const QString &name)
+    {
+        return m_forest.getCollectionNode(name, NodeType::Concept);
+    }
     const Node *findNodeForTarget(const QString &target, const Node *relative);
+    const Node *findNodeForTarget(const QString &target, const Node *relative,
+                                  Genus genus, const QString &moduleName,
+                                  QString *ref = nullptr);
     const PageNode *findPageNodeByTitle(const QString &title)
     {
         return m_forest.findPageNodeByTitle(title);
@@ -289,9 +320,13 @@ public:
     {
         return m_forest.findNodeByNameAndType(path, isMatch);
     }
-    const CollectionNode *getCollectionNode(const QString &name, Node::NodeType type)
+    const CollectionNode *getCollectionNode(const QString &name, NodeType type)
     {
         return m_forest.getCollectionNode(name, type);
+    }
+    CollectionNode *findMutableCollectionNode(const QString &name, NodeType type)
+    {
+        return m_forest.findMutableCollectionNode(name, type);
     }
     const CollectionNode *getModuleNode(const Node *relative);
 
@@ -304,13 +339,13 @@ public:
     QStringList groupNamesForNode(Node *node);
 
 private:
-    const Node *findNodeForTarget(QStringList &targetPath, const Node *relative, Node::Genus genus,
-                                  QString &ref)
+    const Node *findNodeForTarget(QStringList &targetPath, const Node *relative, Genus genus,
+                                  QString &ref, int findFlags = 0)
     {
-        return m_forest.findNodeForTarget(targetPath, relative, genus, ref);
+        return m_forest.findNodeForTarget(targetPath, relative, genus, ref, findFlags);
     }
     const FunctionNode *findFunctionNode(const QStringList &path, const Parameters &parameters,
-                                         const Node *relative, Node::Genus genus)
+                                         const Node *relative, Genus genus)
     {
         return m_forest.findFunctionNode(path, parameters, relative, genus);
     }
@@ -328,7 +363,7 @@ public:
 
     void readIndexes(const QStringList &indexFiles);
     void generateIndex(const QString &fileName, const QString &url, const QString &title,
-                       Generator *g);
+                       const Generator *hrefGenerator);
 
     void processForest();
 
@@ -340,13 +375,14 @@ public:
     void setLocalSearch() { m_forest.m_searchOrder = QList<Tree *>(1, primaryTree()); }
     void setSearchOrder(const QList<Tree *> &searchOrder) { m_forest.m_searchOrder = searchOrder; }
     void setSearchOrder(QStringList &t) { m_forest.setSearchOrder(t); }
-    void mergeCollections(Node::NodeType type, CNMap &cnm, const Node *relative);
+    void mergeCollections(NodeType type, CNMap &cnm, const Node *relative);
     void mergeCollections(CollectionNode *c);
     void clearSearchOrder() { m_forest.clearSearchOrder(); }
     QStringList keys() { return m_forest.keys(); }
     void resolveNamespaces();
     void resolveProxies();
     void resolveBaseClasses();
+    void resolveConceptUsers();
     void updateNavigation();
 
 private:

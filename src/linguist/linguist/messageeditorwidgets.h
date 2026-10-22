@@ -64,7 +64,11 @@ public slots:
     void setVisualizeWhitespace(bool value);
 
 private:
-    MessageHighlighter *m_highlighter;
+    bool event(QEvent *event) override;
+    void applyReadOnlySelectionPalette();
+
+    MessageHighlighter *m_highlighter = nullptr;
+    QPalette m_defaultPalette;
 };
 
 /*
@@ -129,7 +133,7 @@ private slots:
     void slotSelectionChanged();
     void minusButtonClicked();
     void plusButtonClicked();
-
+    void updateIcons();
 private:
     void addEditor(int idx);
     void updateLayout();

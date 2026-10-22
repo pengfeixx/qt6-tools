@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 //
 //  W A R N I N G
@@ -33,7 +34,7 @@ class DPI_Chooser : public QWidget {
 
 public:
     explicit DPI_Chooser(QWidget *parent = nullptr);
-    ~DPI_Chooser();
+    ~DPI_Chooser() override;
 
     void getDPI(int *dpiX, int *dpiY) const;
     void setDPI(int dpiX, int dpiY);

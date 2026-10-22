@@ -1,8 +1,11 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #include "signalsloteditor_plugin.h"
 #include "signalsloteditor_tool.h"
+
+#include <iconloader_p.h>
 
 #include <QtDesigner/abstractformeditor.h>
 #include <QtDesigner/abstractformwindowmanager.h>
@@ -31,9 +34,7 @@ void SignalSlotEditorPlugin::initialize(QDesignerFormEditorInterface *core)
     m_action = new QAction(tr("Edit Signals/Slots"), this);
     m_action->setObjectName(u"__qt_edit_signals_slots_action"_s);
     m_action->setShortcut(tr("F4"));
-    QIcon icon = QIcon::fromTheme(u"designer-edit-signals"_s,
-                                  QIcon(core->resourceLocation() + "/signalslottool.png"_L1));
-    m_action->setIcon(icon);
+    m_action->setIcon(createIconSet("signalslottool.png"_L1));
     m_action->setEnabled(false);
 
     setParent(core);

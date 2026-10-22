@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <db:article xmlns:db="http://docbook.org/ns/docbook" xmlns:xlink="http://www.w3.org/1999/xlink" version="5.2" xml:lang="en">
 <db:info>
-<db:title>Vec Class</db:title>
+<db:title>TestQDoc::Vec Class</db:title>
 <db:subtitle>template &lt;typename T&gt; class TestQDoc::Vec</db:subtitle>
-<db:productname>TestTemplate</db:productname>
+<db:productname>Qt</db:productname>
 <db:titleabbrev>TestTemplate Reference Documentation</db:titleabbrev>
 <db:abstract>
 <db:para>Type alias that has its own reference.</db:para>
@@ -14,7 +14,7 @@
 <db:varlistentry>
 <db:term>Header</db:term>
 <db:listitem>
-<db:para>Vec</db:para>
+<db:para>testcpp.h</db:para>
 </db:listitem>
 </db:varlistentry>
 <db:varlistentry>
@@ -39,5 +39,6 @@
 </db:variablelist>
 <db:section xml:id="details">
 <db:title>Detailed Description</db:title>
+<db:para><db:code role="parameter">T</db:code> is the element type.</db:para>
 </db:section>
 </db:article>

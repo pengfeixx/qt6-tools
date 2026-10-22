@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 /*! \class TextEditFindWidget
 
@@ -22,9 +23,10 @@
 
 #include "texteditfindwidget_p.h"
 
-#include <QtWidgets/QCheckBox>
-#include <QtGui/QTextCursor>
-#include <QtWidgets/QTextEdit>
+#include <QtWidgets/qcheckbox.h>
+#include <QtWidgets/qtextedit.h>
+
+#include <QtGui/qtextcursor.h>
 
 QT_BEGIN_NAMESPACE
 

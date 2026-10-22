@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "qquickwidget_plugin.h"
 
@@ -59,7 +60,7 @@ bool QQuickWidgetPlugin::isContainer() const
 
 QWidget *QQuickWidgetPlugin::createWidget(QWidget *parent)
 {
-    QQuickWidget *result = new QQuickWidget(parent);
+    auto *result = new QQuickWidget(parent);
     connect(result, &QQuickWidget::sceneGraphError,
             this, &QQuickWidgetPlugin::sceneGraphError);
     return result;

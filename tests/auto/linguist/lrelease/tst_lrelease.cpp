@@ -27,6 +27,7 @@ private slots:
     void markuntranslated();
     void dupes();
     void noTranslations();
+    void invalidTranslations();
 
 private:
     void doCompare(const QStringList &actual, const QString &expectedFn);
@@ -152,7 +153,7 @@ void tst_lrelease::compressed()
 
 void tst_lrelease::idbased()
 {
-    QVERIFY(!QProcess::execute(lrelease, QStringList() << "-idbased" << (dataDir + "idbased.ts")));
+    QVERIFY(!QProcess::execute(lrelease, QStringList{ (dataDir + "idbased.ts") }));
 
     QTranslator translator;
     QVERIFY(translator.load(dataDir + "idbased.qm"));
@@ -164,7 +165,8 @@ void tst_lrelease::idbased()
 
 void tst_lrelease::markuntranslated()
 {
-    QVERIFY(!QProcess::execute(lrelease, QStringList() << "-markuntranslated" << "#" << "-idbased" << (dataDir + "idbased.ts")));
+    QVERIFY(!QProcess::execute(lrelease,
+                               QStringList{ "-markuntranslated", "#", (dataDir + "idbased.ts") }));
 
     QTranslator translator;
     QVERIFY(translator.load(dataDir + "idbased.qm"));
@@ -192,6 +194,18 @@ void tst_lrelease::noTranslations()
     QCOMPARE(proc.exitCode(), 0);
     auto stderrOutput = proc.readAllStandardError();
     QVERIFY(stderrOutput.contains("lrelease warning: Met no 'TRANSLATIONS' entry in project file"));
+}
+
+void tst_lrelease::invalidTranslations()
+{
+    QProcess proc;
+    proc.start(lrelease, { "-fail-on-invalid", dataDir + "invalid_de.ts" });
+    QVERIFY(proc.waitForFinished());
+    QCOMPARE(proc.exitStatus(), QProcess::NormalExit);
+    QCOMPARE(proc.exitCode(), 1);
+    auto stderrOutput = proc.readAllStandardError();
+    QVERIFY(stderrOutput.contains("Validation error for translation 'Text nicht &gefunden '"));
+    QVERIFY(stderrOutput.contains("Validation error for translation 'Text gefunden %1'"));
 }
 
 QTEST_MAIN(tst_lrelease)

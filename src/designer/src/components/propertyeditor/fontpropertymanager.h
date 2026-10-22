@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #ifndef FONTPROPERTYMANAGER_H
 #define FONTPROPERTYMANAGER_H
@@ -82,7 +83,6 @@ private:
 
     QHash<QtProperty *, PropertyList> m_propertyToFontSubProperties;
     QHash<QtProperty *, int> m_fontSubPropertyToFlag;
-    PropertyToPropertyMap m_fontSubPropertyToProperty;
     QtProperty *m_createdFontProperty = nullptr;
     QStringList m_aliasingEnumNames;
     QStringList m_hintingPreferenceEnumNames;

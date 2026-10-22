@@ -13,6 +13,9 @@
 #include <QtCore/qhash.h>
 #include <QtCore/qxmlstream.h>
 
+struct RelaxedTemplateDeclaration;
+struct RelaxedTemplateParameter;
+
 QT_BEGIN_NAMESPACE
 
 class Aggregate;
@@ -25,7 +28,7 @@ public:
     explicit DocBookGenerator(FileResolver& file_resolver);
 
     void initializeGenerator() override;
-    QString format() override;
+    QString format() const override;
 
 protected:
     [[nodiscard]] QString fileExtension() const override;
@@ -45,20 +48,31 @@ protected:
 
     void generateList(const Node *relative, const QString &selector,
                       Qt::SortOrder sortOrder = Qt::AscendingOrder);
-    void generateHeader(const QString &title, const QString &subtitle, const Node *node);
+    void generateHeader(const Text &title, const QString &subtitle, const Node *node);
+    void generateHeader(const Text &title, const Node *node);
+    void generateHeader(const QString &title, const QString &subtitle, const Node *node)
+    {
+        generateHeader(Text() << title, subtitle, node);
+    }
+    void generateHeader(const QString &title, const Node *node)
+    {
+        generateHeader(Text() << title, node);
+    }
+    void finishHeader(const Node *node);
     void closeTextSections();
     void generateFooter();
     void generateDocBookSynopsis(const Node *node);
     void generateRequisites(const Aggregate *inner);
     void generateQmlRequisites(const QmlTypeNode *qcn);
     void generateSortedNames(const ClassNode *cn, const QList<RelatedClass> &rc);
-    void generateSortedQmlNames(const Node *base, const NodeList &subs);
+    void generateSortedQmlNames(const Node *base, const QStringList &knownTypes,
+                                const NodeList &subs);
     bool generateStatus(const Node *node);
     void generateGroupReferenceText(const Node *node);
     bool generateThreadSafeness(const Node *node);
     bool generateSince(const Node *node);
     void generateAddendum(const Node *node, Generator::Addendum type, CodeMarker *marker,
-                          bool generateNote) override;
+                          AdmonitionPrefix prefix) override;
     using Generator::generateBody;
     void generateBody(const Node *node);
 
@@ -106,13 +120,17 @@ private:
     void generateClassHierarchy(const Node *relative, NodeMultiMap &classMap);
     void generateFunctionIndex(const Node *relative);
     void generateLegaleseList(const Node *relative);
-    void generateExampleFilePage(const Node *en, ResolvedFile resolved_file, CodeMarker* = nullptr) override;
-    void generateOverloadedSignal(const Node *node);
+    void generateExampleFilePage(const PageNode *en, ResolvedFile resolved_file, CodeMarker* = nullptr) override;
     void generateRequiredLinks(const Node *node);
     void generateLinkToExample(const ExampleNode *en, const QString &baseUrl);
 
     void typified(const QString &string, const Node *relative, bool trailingSpace = false,
                   bool generateType = true);
+    void generateTemplateDecl(const RelaxedTemplateDeclaration *templateDecl,
+                              const Node *relative);
+    void generateTemplateParameter(const RelaxedTemplateParameter &param, const Node *relative);
+    void generateRequiresClauseText(const QString &text, const QStringList &concepts,
+                                    const Node *relative);
     void generateLink(const Atom *atom);
     void beginLink(const QString &link, const Node *node, const Node *relative);
     void endLink();
@@ -128,10 +146,11 @@ private:
     void endSection();
     void writeAnchor(const QString &id);
     void generateSimpleLink(const QString &href, const QString &text);
+    void generateExtraSynopsis(const QString &extra);
     void generateStartRequisite(const QString &description);
     void generateEndRequisite();
     void generateRequisite(const QString &description, const QString &value);
-    void generateCMakeRequisite(const QStringList &values);
+    void generateCMakeRequisite(const QString &findPackage, const QString &linkLibraries);
     void generateSynopsisInfo(const QString &key, const QString &value);
     void generateModifier(const QString &value);
 
@@ -155,6 +174,7 @@ private:
 
     // Generator configuration, set before starting the generation.
     QString m_project {};
+    QString m_productName {};
     QString m_projectDescription {};
     QString m_naturalLanguage {};
     QString m_buildVersion {};

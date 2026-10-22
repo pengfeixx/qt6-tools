@@ -5,7 +5,6 @@ import QtQuick 2.0
 
 /*!
     \qmltype DocTest
-    \inherits Test
     \inqmlmodule QDoc.Test
     \brief Represents a doc test case.
     \since QDoc.Test 0.9
@@ -47,6 +46,24 @@ Item {
     required property string name
 
     /*!
+        Magic numbers.
+    */
+    property list<int> numbers
+
+
+    /*!
+        \qmlproperty list<Item> items
+        List of items.
+    */
+    property list<Item> items
+
+    /*!
+        \qmlproperty list<bool> boolNumbers
+        Property with overridden type.
+    */
+    property list<int> boolNumbers
+
+    /*!
         Whether the test is active.
         \default true
 
@@ -57,6 +74,13 @@ Item {
     /*! \internal */
     property int doctest_internal: -1
 
+    /*!
+    \qmlproperty string icon.source
+    \qmlproperty string icon.name
+
+    Holds an icon.
+    */
+    property Icon icon
     /*!
         \qmlmethod DocTest::fail(message = "oops")
         \since QDoc.Test 1.0

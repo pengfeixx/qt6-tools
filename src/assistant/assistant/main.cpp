@@ -6,7 +6,6 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QLibraryInfo>
 #include <QtCore/QLocale>
-#include <QtCore/QScopedPointer>
 #include <QtCore/QStringList>
 #include <QtCore/QTranslator>
 #include <QtCore/QUrl>
@@ -28,6 +27,8 @@
 #include "helpenginewrapper.h"
 #include "mainwindow.h"
 #include "cmdlineparser.h"
+
+#include <memory>
 
 // #define TRACING_REQUESTED
 
@@ -127,7 +128,7 @@ bool synchronizeDocs(QHelpEngineCore &collection,
             if (!cachedCollection.registerDocumentation(docFile)) {
                 cmd.showMessage(QCoreApplication::translate("Assistant",
                                     "Error registering documentation file '%1': %2").
-                                arg(docFile).arg(cachedCollection.error()), true);
+                                arg(docFile, cachedCollection.error()), true);
                 return false;
             }
         }
@@ -183,7 +184,7 @@ bool registerDocumentation(QHelpEngineCore &collection, CmdLineParser &cmd,
     if (!collection.registerDocumentation(cmd.helpFile())) {
         cmd.showMessage(QCoreApplication::translate("Assistant",
                      "Could not register documentation file\n%1\n\nReason:\n%2")
-                     .arg(cmd.helpFile()).arg(collection.error()), true);
+                     .arg(cmd.helpFile(), collection.error()), true);
         return false;
     }
     if (printSuccess)
@@ -202,7 +203,7 @@ bool unregisterDocumentation(QHelpEngineCore &collection,
         cmd.showMessage(QCoreApplication::translate("Assistant",
                              "Could not unregister documentation"
                              " file\n%1\n\nReason:\n%2").
-                        arg(cmd.helpFile()).arg(collection.error()), true);
+                        arg(cmd.helpFile(), collection.error()), true);
         return false;
     }
     updateLastPagesOnUnregister(collection, namespaceName);
@@ -223,11 +224,13 @@ void setupTranslation(const QString &fileName, const QString &dir)
 void setupTranslations()
 {
     TRACE_OBJ
-    const QString &resourceDir
-        = QLibraryInfo::path(QLibraryInfo::TranslationsPath);
-    setupTranslation("assistant"_L1, resourceDir);
-    setupTranslation("qt"_L1, resourceDir);
-    setupTranslation("qt_help"_L1, resourceDir);
+    const QStringList resourceDirs
+            = QLibraryInfo::paths(QLibraryInfo::TranslationsPath);
+    for (const QString &resourceDir : resourceDirs) {
+        setupTranslation("assistant"_L1, resourceDir);
+        setupTranslation("qt"_L1, resourceDir);
+        setupTranslation("qt_help"_L1, resourceDir);
+    }
 }
 
 } // Anonymous namespace.
@@ -247,13 +250,13 @@ static ExitStatus preliminarySetup(CmdLineParser *cmd)
      */
     const QString collectionFile = cmd->collectionFile();
     const bool collectionFileGiven = !collectionFile.isEmpty();
-    QScopedPointer<QHelpEngineCore> collection;
+    std::unique_ptr<QHelpEngineCore> collection;
     if (collectionFileGiven) {
         collection.reset(new QHelpEngineCore(collectionFile));
         if (!collection->setupData()) {
             cmd->showMessage(QCoreApplication::translate("Assistant",
                              "Error reading collection file '%1': %2.")
-                            .arg(collectionFile).arg(collection->error()), true);
+                            .arg(collectionFile, collection->error()), true);
             return ExitFailure;
         }
     }
@@ -264,15 +267,14 @@ static ExitStatus preliminarySetup(CmdLineParser *cmd)
             && !collection->copyCollectionFile(cachedCollectionFile)) {
         cmd->showMessage(QCoreApplication::translate("Assistant",
                          "Error creating collection file '%1': %2.")
-                        .arg(cachedCollectionFile).arg(collection->error()), true);
+                        .arg(cachedCollectionFile, collection->error()), true);
         return ExitFailure;
     }
     QHelpEngineCore cachedCollection(cachedCollectionFile);
     if (!cachedCollection.setupData()) {
         cmd->showMessage(QCoreApplication::translate("Assistant",
                          "Error reading collection file '%1': %2.")
-                        .arg(cachedCollectionFile)
-                        .arg(cachedCollection.error()), true);
+                        .arg(cachedCollectionFile, cachedCollection.error()), true);
         return ExitFailure;
     }
 
@@ -338,7 +340,7 @@ static ExitStatus preliminarySetup(CmdLineParser *cmd)
 int main(int argc, char *argv[])
 {
     TRACE_OBJ
-    QScopedPointer<QCoreApplication> a(createApplication(argc, argv));
+    std::unique_ptr<QCoreApplication> a(createApplication(argc, argv));
 #if QT_CONFIG(library)
     a->addLibraryPath(a->applicationDirPath() + "/plugins"_L1);
 #endif

@@ -7,6 +7,7 @@
 #include "aggregate.h"
 #include "classnode.h"
 #include "codemarker.h"
+#include "codeparser.h"
 #include "collectionnode.h"
 #include "comparisoncategory.h"
 #include "config.h"
@@ -15,8 +16,13 @@
 #include "enumnode.h"
 #include "examplenode.h"
 #include "functionnode.h"
+#include "inclusionfilter.h"
+#include "inclusionpolicy.h"
+#include "inode.h"
 #include "node.h"
 #include "openedlist.h"
+#include "outputdirectory.h"
+#include "outputproducerregistry.h"
 #include "propertynode.h"
 #include "qdocdatabase.h"
 #include "qmltypenode.h"
@@ -26,6 +32,7 @@
 #include "tokenizer.h"
 #include "typedefnode.h"
 #include "utilities.h"
+#include "textutils.h"
 
 #include <QtCore/qdebug.h>
 #include <QtCore/qdir.h>
@@ -36,6 +43,7 @@
 #endif
 
 #include <string>
+#include <utility>
 
 using namespace std::literals::string_literals;
 
@@ -48,6 +56,7 @@ QMap<QString, QMap<QString, QString>> Generator::s_fmtLeftMaps;
 QMap<QString, QMap<QString, QString>> Generator::s_fmtRightMaps;
 QList<Generator *> Generator::s_generators;
 QString Generator::s_outDir;
+QString Generator::s_imagesOutDir;
 QString Generator::s_outSubdir;
 QStringList Generator::s_outFileNames;
 QSet<QString> Generator::s_trademarks;
@@ -66,6 +75,53 @@ static QLatin1String amp("&amp;");
 static QLatin1String gt("&gt;");
 static QLatin1String lt("&lt;");
 static QLatin1String quot("&quot;");
+
+/*!
+    Returns the set of template parameter names inherited from the parent
+    scope chain of \a node. This includes template parameters from enclosing
+    class templates, which are visible but not required to be documented
+    in nested classes or member functions.
+*/
+static QSet<QString> inheritedTemplateParamNames(const Node *node)
+{
+    QSet<QString> names;
+    for (const Node *p = node->parent(); p; p = p->parent()) {
+        if (p->templateDecl())
+            names.unite(p->templateDecl()->parameterNames());
+    }
+    return names;
+}
+
+/*!
+    \enum ValidationContext
+    Selects warning message wording based on documentation context.
+
+    \value FunctionDoc Warns "No such parameter" (function docs may reference
+           both function parameters and template parameters).
+    \value TemplateDoc Warns "No such template parameter" (template class/alias
+           docs reference only template parameters).
+*/
+enum class ValidationContext { FunctionDoc, TemplateDoc };
+
+/*!
+    Warns about documented parameter names in \a node that don't exist in
+    \a allowedNames. Uses \a context to select appropriate wording.
+*/
+static void warnAboutUnknownDocumentedParams(const Node *node,
+                                             const QSet<QString> &documentedNames,
+                                             const QSet<QString> &allowedNames,
+                                             ValidationContext context)
+{
+    for (const auto &name : documentedNames) {
+        if (!allowedNames.contains(name) && CodeParser::isWorthWarningAbout(node->doc())) {
+            const auto message = (context == ValidationContext::TemplateDoc)
+                    ? "No such template parameter '%1' in %2"_L1
+                    : "No such parameter '%1' in %2"_L1;
+            node->doc().location().warning(message.arg(name, node->plainFullName()),
+                                           suggestName(name, allowedNames));
+        }
+    }
+}
 
 /*!
   Constructs the generator base class. Prepends the newly
@@ -94,10 +150,8 @@ void Generator::appendFullName(Text &text, const Node *apparentNode, const Node 
 {
     if (actualNode == nullptr)
         actualNode = apparentNode;
-    text << Atom(Atom::LinkNode, CodeMarker::stringForNode(actualNode))
-         << Atom(Atom::FormattingLeft, ATOM_FORMATTING_LINK)
-         << Atom(Atom::String, apparentNode->plainFullName(relative))
-         << Atom(Atom::FormattingRight, ATOM_FORMATTING_LINK);
+
+    addNodeLink(text, actualNode, apparentNode->plainFullName(relative));
 }
 
 void Generator::appendFullName(Text &text, const Node *apparentNode, const QString &fullName,
@@ -105,9 +159,8 @@ void Generator::appendFullName(Text &text, const Node *apparentNode, const QStri
 {
     if (actualNode == nullptr)
         actualNode = apparentNode;
-    text << Atom(Atom::LinkNode, CodeMarker::stringForNode(actualNode))
-         << Atom(Atom::FormattingLeft, ATOM_FORMATTING_LINK) << Atom(Atom::String, fullName)
-         << Atom(Atom::FormattingRight, ATOM_FORMATTING_LINK);
+
+    addNodeLink(text, actualNode, fullName);
 }
 
 /*!
@@ -117,10 +170,7 @@ void Generator::appendFullName(Text &text, const Node *apparentNode, const QStri
  */
 void Generator::appendSignature(Text &text, const Node *node)
 {
-    text << Atom(Atom::LinkNode, CodeMarker::stringForNode(node))
-         << Atom(Atom::FormattingLeft, ATOM_FORMATTING_LINK)
-         << Atom(Atom::String, node->signature(Node::SignaturePlain))
-         << Atom(Atom::FormattingRight, ATOM_FORMATTING_LINK);
+    addNodeLink(text, node, node->signature(Node::SignaturePlain));
 }
 
 /*!
@@ -159,25 +209,33 @@ int Generator::appendSortedNames(Text &text, const ClassNode *cn, const QList<Re
     const QStringList classNames = classMap.keys();
     for (const auto &className : classNames) {
         text << classMap[className];
-        text << Utilities::comma(index++, classNames.size());
+        text << TextUtils::comma(index++, classNames.size());
     }
     return index;
 }
 
-int Generator::appendSortedQmlNames(Text &text, const Node *base, const NodeList &subs)
+int Generator::appendSortedQmlNames(Text &text, const Node *base, const QStringList &knownTypes,
+                                    const NodeList &subs)
 {
     QMap<QString, Text> classMap;
+
+    QStringList typeNames(knownTypes);
+    for (const auto sub : subs)
+        typeNames << sub->name();
 
     for (const auto sub : subs) {
         Text full_name;
         appendFullName(full_name, sub, base);
+        // Disambiguate with '(<QML module name>)' if there are clashing type names
+        if (typeNames.count(sub->name()) > 1)
+            full_name << Atom(Atom::String, " (%1)"_L1.arg(sub->logicalModuleName()));
         classMap[full_name.toString().toLower()] = full_name;
     }
 
     int index = 0;
     const auto &names = classMap.keys();
     for (const auto &name : names)
-        text << classMap[name] << Utilities::comma(index++, names.size());
+        text << classMap[name] << TextUtils::comma(index++, names.size());
     return index;
 }
 
@@ -189,14 +247,19 @@ int Generator::appendSortedQmlNames(Text &text, const Node *base, const NodeList
 
   \sa beginSubPage()
  */
-QFile *Generator::openSubPageFile(const Node *node, const QString &fileName)
+QFile *Generator::openSubPageFile(const PageNode *node, const QString &fileName)
 {
-    if (s_outFileNames.contains(fileName))
+    // Skip generating a warning for license attribution pages, as their source
+    // is generated by qtattributionsscanner and may potentially include duplicates.
+    // NOTE: Depending on the value of the `QtParts` field in qt_attribution.json files,
+    // qtattributionsscanner may not use the \attribution QDoc command for the page
+    // (by design). Therefore, check also filename.
+    if (s_outFileNames.contains(fileName) && !node->isAttribution() && !fileName.contains("-attribution-"_L1))
         node->location().warning("Already generated %1 for this project"_L1.arg(fileName));
 
     QString path = outputDir() + QLatin1Char('/') + fileName;
 
-    auto outPath = s_redirectDocumentationToDevNull ? QStringLiteral("/dev/null") : path;
+    const auto &outPath = s_redirectDocumentationToDevNull ? QStringLiteral("/dev/null") : path;
     auto outFile = new QFile(outPath);
 
     if (!s_redirectDocumentationToDevNull && outFile->exists()) {
@@ -223,9 +286,9 @@ QFile *Generator::openSubPageFile(const Node *node, const QString &fileName)
   Attaches a QTextStream to the created file, which is written
   to all over the place using out().
  */
-void Generator::beginSubPage(const Node *node, const QString &fileName)
+void Generator::beginSubPage(const PageNode *node, const QString &fileName)
 {
-    QFile *outFile = openSubPageFile(node, fileName);
+    QFile *outFile = openSubPageFile(static_cast<const PageNode*>(node), fileName);
     auto *out = new QTextStream(outFile);
     outStreamStack.push(out);
 }
@@ -250,63 +313,13 @@ QString Generator::fileBase(const Node *node) const
     if (node->hasFileNameBase())
         return node->fileNameBase();
 
-    QString base{node->name()};
-    if (base.endsWith(".html"))
-        base.truncate(base.size() - 5);
+    QString result = Utilities::computeFileBase(
+        node, s_project,
+        [](const Node *n) { return outputPrefix(n); },
+        [](const Node *n) { return outputSuffix(n); });
 
-    if (node->isCollectionNode()) {
-        if (node->isQmlModule())
-            base.append("-qmlmodule");
-        else if (node->isModule())
-            base.append("-module");
-        base.append(outputSuffix(node));
-    } else if (node->isTextPageNode()) {
-        if (node->isExample()) {
-            base.prepend("%1-"_L1.arg(s_project.toLower()));
-            base.append("-example");
-        }
-    } else if (node->isQmlType()) {
-        /*
-          To avoid file name conflicts in the html directory,
-          we prepend a prefix (by default, "qml-") and an optional suffix
-          to the file name. The suffix, if one exists, is appended to the
-          module name.
-
-          For historical reasons, skip the module name qualifier for QML value types
-          in order to avoid excess redirects in the online docs. TODO: re-assess
-        */
-        if (!node->logicalModuleName().isEmpty() && !node->isQmlBasicType()
-            && (!node->logicalModule()->isInternal() || m_showInternal))
-            base.prepend("%1%2-"_L1.arg(node->logicalModuleName(), outputSuffix(node)));
-
-    } else if (node->isProxyNode()) {
-        base.append("-%1-proxy"_L1.arg(node->tree()->physicalModuleName()));
-    } else {
-        base.clear();
-        const Node *p = node;
-        forever {
-            const Node *pp = p->parent();
-            base.prepend(p->name());
-            if (pp == nullptr || pp->name().isEmpty() || pp->isTextPageNode())
-                break;
-            base.prepend('-'_L1);
-            p = pp;
-        }
-        if (node->isNamespace() && !node->name().isEmpty()) {
-            const auto *ns = static_cast<const NamespaceNode *>(node);
-            if (!ns->isDocumentedHere()) {
-                base.append(QLatin1String("-sub-"));
-                base.append(ns->tree()->camelCaseModuleName());
-            }
-        }
-        base.append(outputSuffix(node));
-    }
-
-    base.prepend(outputPrefix(node));
-    QString canonicalName{ Utilities::asAsciiPrintable(base) };
-    Node *n = const_cast<Node *>(node);
-    n->setFileNameBase(canonicalName);
-    return canonicalName;
+    const_cast<Node *>(node)->setFileNameBase(result);
+    return result;
 }
 
 /*!
@@ -315,15 +328,9 @@ QString Generator::fileBase(const Node *node) const
   (default value), retrieve the file extension from
   the generator.
  */
-QString Generator::linkForExampleFile(const QString &path, const QString &fileExt)
+QString Generator::linkForExampleFile(const QString &path, const QString &fileExt) const
 {
-    QString link{path};
-    link.prepend(s_project.toLower() + QLatin1Char('-'));
-
-    QString canonicalName{ Utilities::asAsciiPrintable(link) };
-    canonicalName.append(QLatin1Char('.'));
-    canonicalName.append(fileExt.isEmpty() ? fileExtension() : fileExt);
-    return canonicalName;
+    return Utilities::linkForExampleFile(path, s_project, fileExt.isEmpty() ? fileExtension() : fileExt);
 }
 
 /*!
@@ -332,15 +339,7 @@ QString Generator::linkForExampleFile(const QString &path, const QString &fileEx
 */
 QString Generator::exampleFileTitle(const ExampleNode *relative, const QString &fileName)
 {
-    QString suffix;
-    if (relative->files().contains(fileName))
-        suffix = QLatin1String(" Example File");
-    else if (relative->images().contains(fileName))
-        suffix = QLatin1String(" Image File");
-    else
-        return suffix;
-
-    return fileName.mid(fileName.lastIndexOf(QLatin1Char('/')) + 1) + suffix;
+    return Utilities::exampleFileTitle(relative->files(), relative->images(), fileName);
 }
 
 /*!
@@ -353,6 +352,19 @@ QString Generator::fileName(const Node *node, const QString &extension) const
 {
     if (!node->url().isEmpty())
         return node->url();
+
+    // Special case for simple page nodes (\page commands) with explicit
+    // non-.html extensions. Use the normalized fileBase() but preserve
+    // user specified extension
+    if (node->isTextPageNode() && !node->isCollectionNode() && extension.isNull()) {
+        QFileInfo originalName(node->name());
+        QString suffix = originalName.suffix();
+        if (!suffix.isEmpty() && suffix != "html") {
+            // User specified a non-.html extension - use normalized base + original extension
+            QString name = fileBase(node);
+            return name + QLatin1Char('.') + suffix;
+        }
+    }
 
     QString name = fileBase(node) + QLatin1Char('.');
     return name + (extension.isNull() ? fileExtension() : extension);
@@ -435,7 +447,7 @@ QMap<QString, QString> &Generator::formattingRightMap()
 /*!
   Returns the full document location.
  */
-QString Generator::fullDocumentLocation(const Node *node)
+QString Generator::fullDocumentLocation(const Node *node) const
 {
     if (node == nullptr)
         return QString();
@@ -451,13 +463,13 @@ QString Generator::fullDocumentLocation(const Node *node)
           an attribute containing the location of any documentation.
         */
         if (!fileBase(node).isEmpty())
-            parentName = fileBase(node) + QLatin1Char('.') + currentGenerator()->fileExtension();
+            parentName = fileBase(node) + QLatin1Char('.') + fileExtension();
         else
             return QString();
     } else if (node->isQmlType()) {
-        return fileBase(node) + QLatin1Char('.') + currentGenerator()->fileExtension();
+        return fileBase(node) + QLatin1Char('.') + fileExtension();
     } else if (node->isTextPageNode() || node->isCollectionNode()) {
-        parentName = fileBase(node) + QLatin1Char('.') + currentGenerator()->fileExtension();
+        parentName = fileBase(node) + QLatin1Char('.') + fileExtension();
     } else if (fileBase(node).isEmpty())
         return QString();
 
@@ -470,23 +482,23 @@ QString Generator::fullDocumentLocation(const Node *node)
     }
 
     switch (node->nodeType()) {
-    case Node::Class:
-    case Node::Struct:
-    case Node::Union:
-    case Node::Namespace:
-    case Node::Proxy:
-        parentName = fileBase(node) + QLatin1Char('.') + currentGenerator()->fileExtension();
+    case NodeType::Class:
+    case NodeType::Struct:
+    case NodeType::Union:
+    case NodeType::Namespace:
+    case NodeType::Proxy:
+        parentName = fileBase(node) + QLatin1Char('.') + fileExtension();
         break;
-    case Node::Function: {
+    case NodeType::Function: {
         const auto *fn = static_cast<const FunctionNode *>(node);
         switch (fn->metaness()) {
-        case FunctionNode::QmlSignal:
+        case Metaness::QmlSignal:
             anchorRef = QLatin1Char('#') + node->name() + "-signal";
             break;
-        case FunctionNode::QmlSignalHandler:
+        case Metaness::QmlSignalHandler:
             anchorRef = QLatin1Char('#') + node->name() + "-signal-handler";
             break;
-        case FunctionNode::QmlMethod:
+        case Metaness::QmlMethod:
             anchorRef = QLatin1Char('#') + node->name() + "-method";
             break;
         default:
@@ -508,43 +520,44 @@ QString Generator::fullDocumentLocation(const Node *node)
       the latter returns the name in lower-case. For
       HTML anchors, we need to preserve the case.
     */
-    case Node::Enum:
+    case NodeType::Enum:
+    case NodeType::QmlEnum:
         anchorRef = QLatin1Char('#') + node->name() + "-enum";
         break;
-    case Node::Typedef: {
+    case NodeType::Typedef: {
         const auto *tdef = static_cast<const TypedefNode *>(node);
         if (tdef->associatedEnum())
             return fullDocumentLocation(tdef->associatedEnum());
     } Q_FALLTHROUGH();
-    case Node::TypeAlias:
+    case NodeType::TypeAlias:
         anchorRef = QLatin1Char('#') + node->name() + "-typedef";
         break;
-    case Node::Property:
+    case NodeType::Property:
         anchorRef = QLatin1Char('#') + node->name() + "-prop";
         break;
-    case Node::SharedComment: {
+    case NodeType::SharedComment: {
         if (!node->isPropertyGroup())
             break;
     } Q_FALLTHROUGH();
-    case Node::QmlProperty:
+    case NodeType::QmlProperty:
         if (node->isAttached())
             anchorRef = QLatin1Char('#') + node->name() + "-attached-prop";
         else
             anchorRef = QLatin1Char('#') + node->name() + "-prop";
         break;
-    case Node::Variable:
+    case NodeType::Variable:
         anchorRef = QLatin1Char('#') + node->name() + "-var";
         break;
-    case Node::QmlType:
-    case Node::Page:
-    case Node::Group:
-    case Node::HeaderFile:
-    case Node::Module:
-    case Node::QmlModule: {
+    case NodeType::QmlType:
+    case NodeType::Page:
+    case NodeType::Group:
+    case NodeType::HeaderFile:
+    case NodeType::Module:
+    case NodeType::QmlModule: {
         parentName = fileBase(node);
         parentName.replace(QLatin1Char('/'), QLatin1Char('-'))
                 .replace(QLatin1Char('.'), QLatin1Char('-'));
-        parentName += QLatin1Char('.') + currentGenerator()->fileExtension();
+        parentName += QLatin1Char('.') + fileExtension();
     } break;
     default:
         break;
@@ -552,13 +565,21 @@ QString Generator::fullDocumentLocation(const Node *node)
 
     if (!node->isClassNode() && !node->isNamespace()) {
         if (node->isDeprecated())
-            parentName.replace(QLatin1Char('.') + currentGenerator()->fileExtension(),
-                               "-obsolete." + currentGenerator()->fileExtension());
+            parentName.replace(QLatin1Char('.') + fileExtension(),
+                               "-obsolete." + fileExtension());
     }
 
     return parentName.toLower() + anchorRef;
 }
 
+/*!
+    Generates text for a "see also" list for the given \a node and \a marker
+    if a list has been defined.
+
+    Check for links to the node containing the \sa command, looking for empty
+    ref fields to ensure that a link is referring to the node itself and not
+    a different section of a larger document.
+*/
 void Generator::generateAlsoList(const Node *node, CodeMarker *marker)
 {
     QList<Text> alsoList = node->doc().alsoList();
@@ -569,8 +590,25 @@ void Generator::generateAlsoList(const Node *node, CodeMarker *marker)
         text << Atom::ParaLeft << Atom(Atom::FormattingLeft, ATOM_FORMATTING_BOLD) << "See also "
              << Atom(Atom::FormattingRight, ATOM_FORMATTING_BOLD);
 
-        for (int i = 0; i < alsoList.size(); ++i)
-            text << alsoList.at(i) << Utilities::separator(i, alsoList.size());
+        QSet<QString> used;
+        QList<Text> items;
+        for (const auto &also : std::as_const(alsoList)) {
+            // Every item starts with a link atom.
+            const Atom *atom = also.firstAtom();
+            QString link = atom->string();
+            if (!used.contains(link)) {
+                items.append(also);
+                used.insert(link);
+
+                QString ref;
+                if (m_qdb->findNodeForAtom(atom, node, ref) == node && ref.isEmpty())
+                    node->doc().location().warning("Redundant link to self in \\sa command for %1"_L1.arg(node->name()));
+            }
+        }
+
+        int i = 0;
+        for (const auto &also : std::as_const(items))
+            text << also << TextUtils::separator(i++, items.size());
 
         text << Atom::ParaRight;
         generateText(text, node, marker);
@@ -621,6 +659,7 @@ const Atom *Generator::generateAtomList(const Atom *atom, const Node *relative, 
     return nullptr;
 }
 
+
 /*!
   Generate the body of the documentation from the qdoc comment
   found with the entity represented by the \a node.
@@ -645,43 +684,56 @@ void Generator::generateBody(const Node *node, CodeMarker *marker)
                 out() << "</p>";
             } else if (fn->isCtor()) {
                 Text text;
-                text << "Default constructs an instance of ";
-                text << fn->parent()->name() << ".";
+                text << "Default-constructs an instance of "
+                     << fn->parent()->name() << ".";
                 out() << "<p>";
                 generateText(text, node, marker);
                 out() << "</p>";
             } else if (fn->isCCtor()) {
                 Text text;
-                text << "Copy constructor.";
+                text << "Copy-constructs an instance of "
+                     << fn->parent()->name() << ".";
                 out() << "<p>";
                 generateText(text, node, marker);
                 out() << "</p>";
             } else if (fn->isMCtor()) {
                 Text text;
-                text << "Move-copy constructor.";
+                text << "Move-constructs an instance of "
+                     << fn->parent()->name() << ".";
                 out() << "<p>";
                 generateText(text, node, marker);
                 out() << "</p>";
             } else if (fn->isCAssign()) {
                 Text text;
-                text << "Copy-assignment operator.";
+                text << "Copy-assigns "
+                     << Atom(Atom::FormattingLeft, ATOM_FORMATTING_PARAMETER)
+                     << "other" << Atom(Atom::FormattingRight, ATOM_FORMATTING_PARAMETER)
+                     << " to this " << fn->parent()->name() << " instance.";
                 out() << "<p>";
                 generateText(text, node, marker);
                 out() << "</p>";
             } else if (fn->isMAssign()) {
                 Text text;
-                text << "Move-assignment operator.";
+                text << "Move-assigns "
+                     << Atom(Atom::FormattingLeft, ATOM_FORMATTING_PARAMETER)
+                     << "other" << Atom(Atom::FormattingRight, ATOM_FORMATTING_PARAMETER)
+                     << " to this " << fn->parent()->name() << " instance.";
                 out() << "<p>";
                 generateText(text, node, marker);
                 out() << "</p>";
             } else if (!node->isWrapper() && !node->isMarkedReimp()) {
-                if (!fn->isIgnored()) // undocumented functions added by Q_OBJECT
-                    node->location().warning(QStringLiteral("No documentation for '%1'")
-                                                     .arg(node->plainSignature()));
+                const InclusionPolicy policy = Config::instance().createInclusionPolicy();
+                const NodeContext context = node->createContext();
+                if (!fn->isIgnored() && InclusionFilter::requiresDocumentation(policy, context)) // undocumented functions added by Q_OBJECT
+                    node->location().warning(
+                            QStringLiteral("No documentation for %1 '%2'")
+                                    .arg(fn->kindString(), node->plainSignature()));
             }
         } else if (!node->isWrapper() && !node->isMarkedReimp()) {
             // Don't require documentation of things defined in Q_GADGET
-            if (node->name() != QLatin1String("QtGadgetHelper"))
+            const InclusionPolicy policy = Config::instance().createInclusionPolicy();
+            const NodeContext context = node->createContext();
+            if (node->name() != QLatin1String("QtGadgetHelper") && InclusionFilter::requiresDocumentation(policy, context))
                 node->location().warning(
                         QStringLiteral("No documentation for '%1'").arg(node->plainSignature()));
         }
@@ -708,6 +760,9 @@ void Generator::generateBody(const Node *node, CodeMarker *marker)
                 generateAddendum(node, Invokable, marker);
             if (fn->hasAssociatedProperties())
                 generateAddendum(node, AssociatedProperties, marker);
+            if (fn->hasOverloads() && fn->doc().hasOverloadCommand()
+                && !fn->isSignal() && !fn->isSlot())
+                generateAddendum(node, OverloadNote, marker, AdmonitionPrefix::None);
         }
 
         // Generate warnings
@@ -726,15 +781,11 @@ void Generator::generateBody(const Node *node, CodeMarker *marker)
                 || allItems.size() > documentedItems.size()) {
                 for (const auto &it : allItems) {
                     if (!definedItems.contains(it)) {
-                        QString details;
-                        QString best = nearestName(it, definedItems);
-                        if (!best.isEmpty() && !documentedItems.contains(best))
-                            details = QStringLiteral("Maybe you meant '%1'?").arg(best);
-
                         node->doc().location().warning(
                                 QStringLiteral("No such enum item '%1' in %2")
                                         .arg(it, node->plainFullName()),
-                                details);
+                                QStringLiteral("Maybe you meant '%1'?")
+                                        .arg(suggestName(it, definedItems, documentedItems)));
                     } else if (!documentedItems.contains(it)) {
                         node->doc().location().warning(
                                 QStringLiteral("Undocumented enum item '%1' in %2")
@@ -743,35 +794,52 @@ void Generator::generateBody(const Node *node, CodeMarker *marker)
                 }
             }
         } else if (fn) {
-            const QSet<QString> declaredNames = fn->parameters().getNames();
+            // Build name environment with visibility vs. responsibility distinction:
+            // - requiredNames: names that must be documented (function params + API-significant template params)
+            // - allowedNames: all names that can be referenced (includes type template params + inherited)
+            //
+            // For functions, type template parameters (typename T) are not required because
+            // they typically serve to type function parameters - documenting the function
+            // parameter implicitly covers the template parameter's role. Only non-type and
+            // template-template parameters are required as they carry independent meaning.
+            const QSet<QString> requiredFunctionParams = fn->parameters().getNames();
+            const QSet<QString> requiredTemplateParams = fn->templateDecl()
+                    ? fn->templateDecl()->requiredParameterNamesForFunctions()
+                    : QSet<QString>{};
+            const QSet<QString> requiredNames = requiredFunctionParams + requiredTemplateParams;
+
+            // All template parameters (including type params and inherited from parent chain)
+            // are allowed to be referenced without "no such parameter" warnings
+            const QSet<QString> ownTemplateParams = fn->templateDecl()
+                    ? fn->templateDecl()->parameterNames()
+                    : QSet<QString>{};
+            const QSet<QString> allowedNames = requiredNames + ownTemplateParams
+                    + inheritedTemplateParamNames(fn);
+
             const QSet<QString> documentedNames = fn->doc().parameterNames();
-            if (declaredNames != documentedNames) {
-                for (const auto &name : declaredNames) {
-                    if (!documentedNames.contains(name)) {
-                        if (fn->isActive() || fn->isPreliminary()) {
-                            // Require no parameter documentation for overrides and overloads,
-                            // and only require it for non-overloaded constructors.
-                            if (!fn->isMarkedReimp() && !fn->isOverload() &&
-                                !(fn->isSomeCtor() && fn->hasOverloads())) {
-                                fn->doc().location().warning(
-                                        QStringLiteral("Undocumented parameter '%1' in %2")
-                                                .arg(name, node->plainFullName()));
-                            }
+
+            // Warn about missing required parameters
+            for (const auto &name : requiredNames) {
+                if (!documentedNames.contains(name)) {
+                    if (fn->isActive() || fn->isPreliminary()) {
+                        // Require no parameter documentation for overrides and overloads,
+                        // and only require it for non-overloaded constructors.
+                        if (!fn->isMarkedReimp() && !fn->isOverload()
+                            && !(fn->isSomeCtor() && fn->hasOverloads())) {
+                            // Use appropriate wording based on parameter type
+                            const bool isTemplateParam = requiredTemplateParams.contains(name);
+                            fn->doc().location().warning(
+                                    "Undocumented %1 '%2' in %3"_L1
+                                            .arg(isTemplateParam ? "template parameter"_L1
+                                                                 : "parameter"_L1,
+                                                 name, node->plainFullName()));
                         }
                     }
                 }
-                for (const auto &name : documentedNames) {
-                    if (!declaredNames.contains(name)) {
-                        QString best = nearestName(name, declaredNames);
-                        QString details;
-                        if (!best.isEmpty())
-                            details = QStringLiteral("Maybe you meant '%1'?").arg(best);
-                        fn->doc().location().warning(QStringLiteral("No such parameter '%1' in %2")
-                                                             .arg(name, fn->plainFullName()),
-                                                     details);
-                    }
-                }
             }
+
+            warnAboutUnknownDocumentedParams(fn, documentedNames, allowedNames,
+                                             ValidationContext::FunctionDoc);
             /*
               This return value check should be implemented
               for all functions with a return type.
@@ -784,9 +852,33 @@ void Generator::generateBody(const Node *node, CodeMarker *marker)
                             QStringLiteral("Undocumented return value "
                                            "(hint: use 'return' or 'returns' in the text"));
             }
+        } else if (node->isQmlProperty()) {
+            if (auto *qpn = static_cast<const QmlPropertyNode *>(node); !qpn->validateDataType())
+                qpn->doc().location().warning("Invalid QML property type: %1"_L1.arg(qpn->dataType()));
+        } else if (node->templateDecl()) {
+            // Template classes, type aliases, and other non-function template declarations
+            // Use the same visibility vs. responsibility model as functions:
+            // - requiredNames: template params declared on this node (must be documented)
+            // - allowedNames: required + inherited from parent chain (can be referenced)
+            const QSet<QString> requiredNames = node->templateDecl()->parameterNames();
+            const QSet<QString> allowedNames = requiredNames + inheritedTemplateParamNames(node);
+            const QSet<QString> documentedNames = node->doc().parameterNames();
+
+            if (node->isActive() || node->isPreliminary()) {
+                for (const auto &name : requiredNames) {
+                    if (!documentedNames.contains(name) && CodeParser::isWorthWarningAbout(node->doc())) {
+                        node->doc().location().warning(
+                                "Undocumented template parameter '%1' in %2"_L1
+                                        .arg(name, node->plainFullName()));
+                    }
+                }
+            }
+
+            warnAboutUnknownDocumentedParams(node, documentedNames, allowedNames,
+                                             ValidationContext::TemplateDoc);
         }
     }
-    generateEnumValuesForQmlProperty(node, marker);
+    generateEnumValuesForQmlReference(node, marker);
     generateRequiredLinks(node, marker);
 }
 
@@ -862,7 +954,6 @@ void Generator::generateLinkToExample(const ExampleNode *en, CodeMarker *marker,
 
 void Generator::addImageToCopy(const ExampleNode *en, const ResolvedFile& resolved_file)
 {
-    QDir dirInfo;
     // TODO: [uncentralized-output-directory-structure]
     const QString prefix("/images/used-in-examples");
 
@@ -872,12 +963,21 @@ void Generator::addImageToCopy(const ExampleNode *en, const ResolvedFile& resolv
     // would actually store the file itself.
     s_outFileNames << prefix.mid(1) + "/" + resolved_file.get_query();
 
+    const OutputDirectory outDir =
+            OutputDirectory::ensure(s_outDir, en->location());
+    const OutputDirectory imagesUsedInExamplesDir =
+            outDir.ensureSubdir(prefix.mid(1), en->location());
 
-    // TODO: [uncentralized-output-directory-structure]
-    QString imgOutDir = s_outDir + prefix + "/" + QFileInfo{resolved_file.get_query()}.path();
-    if (!dirInfo.mkpath(imgOutDir))
-        en->location().fatal(QStringLiteral("Cannot create output directory '%1'").arg(imgOutDir));
-    Config::copyFile(en->location(), resolved_file.get_path(), QFileInfo{resolved_file.get_query()}.fileName(), imgOutDir);
+    const QFileInfo fi{resolved_file.get_query()};
+    const QString relativePath = fi.path();
+    // QFileInfo::path() can return "." for files with no directory component
+    const bool hasSubdir = !relativePath.isEmpty() && relativePath != "."_L1;
+    const OutputDirectory imgOutDir =
+            hasSubdir ? imagesUsedInExamplesDir.ensureSubdir(relativePath, en->location())
+                      : imagesUsedInExamplesDir;
+
+    const QString fileName = fi.fileName();
+    Config::copyFile(en->location(), resolved_file.get_path(), fileName, imgOutDir.path());
 }
 
 // TODO: [multi-purpose-function-with-flag][generate-file-list]
@@ -936,9 +1036,11 @@ void Generator::generateFileList(const ExampleNode *en, CodeMarker *marker, bool
             continue;
         }
 
-        auto file{*maybe_resolved_file};
-        if (images) addImageToCopy(en, file);
-        else        generateExampleFilePage(en, file, marker);
+        const auto &file{*maybe_resolved_file};
+        if (images)
+            addImageToCopy(en, file);
+        else
+            generateExampleFilePage(en, file, marker);
 
         openedList.next();
         text << Atom(Atom::ListItemNumber, openedList.numberString())
@@ -961,7 +1063,9 @@ void Generator::generateDocumentation(Node *node)
         return;
     if (node->isIndexNode())
         return;
-    if (node->isInternal() && !m_showInternal)
+    const InclusionPolicy policy = Config::instance().createInclusionPolicy();
+    const NodeContext context = node->createContext();
+    if (!InclusionFilter::isIncluded(policy, context))
         return;
     if (node->isExternalPage())
         return;
@@ -971,8 +1075,9 @@ void Generator::generateDocumentation(Node *node)
      */
     CodeMarker *marker = CodeMarker::markerForFileName(node->location().filePath());
 
-    if (node->parent() != nullptr) {
-        if (node->isCollectionNode()) {
+    if (node->parent() != nullptr && node->isPageNode()) {
+        PageNode *pageNode = static_cast<PageNode *>(node);
+        if (pageNode->isCollectionNode()) {
             /*
               A collection node collects: groups, C++ modules, or QML
               modules. Testing for a CollectionNode must be done
@@ -995,7 +1100,7 @@ void Generator::generateDocumentation(Node *node)
             auto *cn = static_cast<CollectionNode *>(node);
             if (cn->wasSeen()) {
                 m_qdb->mergeCollections(cn);
-                beginSubPage(node, fileName(node));
+                beginSubPage(pageNode, fileName(node));
                 generateCollectionNode(cn, marker);
                 endSubPage();
             } else if (cn->isGenericCollection()) {
@@ -1006,27 +1111,27 @@ void Generator::generateDocumentation(Node *node)
                 name.replace(QChar(' '), QString("-"));
                 QString filename =
                         cn->tree()->physicalModuleName() + "-" + name + "." + fileExtension();
-                beginSubPage(node, filename);
+                beginSubPage(pageNode, filename);
                 generateGenericCollectionPage(cn, marker);
                 endSubPage();
             }
         } else if (node->isTextPageNode()) {
-            beginSubPage(node, fileName(node));
-            generatePageNode(static_cast<PageNode *>(node), marker);
+            beginSubPage(pageNode, fileName(node));
+            generatePageNode(pageNode, marker);
             endSubPage();
         } else if (node->isAggregate()) {
             if ((node->isClassNode() || node->isHeader() || node->isNamespace())
                 && node->docMustBeGenerated()) {
-                beginSubPage(node, fileName(node));
+                beginSubPage(pageNode, fileName(node));
                 generateCppReferencePage(static_cast<Aggregate *>(node), marker);
                 endSubPage();
             } else if (node->isQmlType()) {
-                beginSubPage(node, fileName(node));
+                beginSubPage(pageNode, fileName(node));
                 auto *qcn = static_cast<QmlTypeNode *>(node);
                 generateQmlTypePage(qcn, marker);
                 endSubPage();
             } else if (node->isProxyNode()) {
-                beginSubPage(node, fileName(node));
+                beginSubPage(pageNode, fileName(node));
                 generateProxyPage(static_cast<Aggregate *>(node), marker);
                 endSubPage();
             }
@@ -1037,14 +1142,15 @@ void Generator::generateDocumentation(Node *node)
         auto *aggregate = static_cast<Aggregate *>(node);
         const NodeList &children = aggregate->childNodes();
         for (auto *child : children) {
-            if (child->isPageNode() && !child->isPrivate()) {
+            if (child->isPageNode()) {
                 generateDocumentation(child);
-            } else if (!node->parent() && child->isInAPI() && !child->isRelatedNonmember()) {
+            } else if (!node->parent() && child->isInAPI() && !child->isRelatedNonmember()
+                       && !child->doc().isAutoGenerated()) {
                 // Warn if there are documented non-page-generating nodes in the root namespace
                 child->location().warning(u"No documentation generated for %1 '%2' in global scope."_s
                     .arg(typeString(child), child->name()),
                             u"Maybe you forgot to use the '\\relates' command?"_s);
-                child->setStatus(Node::DontDocument);
+                child->setStatus(Status::DontDocument);
             } else if (child->isQmlModule() && !child->wasSeen()) {
                 // An undocumented QML module that was constructed as a placeholder
                 auto *qmlModule = static_cast<CollectionNode *>(child);
@@ -1105,9 +1211,11 @@ QString Generator::formatSince(const Node *node)
 {
     QStringList since = node->since().split(QLatin1Char(' '));
 
-    // If there is only one argument, assume it is the Qt version number.
-    if (since.size() == 1)
-        return "Qt " + since[0];
+    // If there is only one argument, assume it is the product version number.
+    if (since.size() == 1) {
+        const QString productName = Config::instance().get(CONFIG_PRODUCTNAME).asString();
+        return productName.isEmpty() ? node->since() :  productName +  " " + since[0];
+    }
 
     // Otherwise, use the original <project> <version> string.
     return node->since();
@@ -1123,7 +1231,8 @@ QString Generator::formatSince(const Node *node)
           \c {\meta {status} {<description>}},
       \li 'Deprecated [since <version>]' (\\deprecated [<version>]),
       \li 'Until <version>',
-      \li 'Preliminary' (\\preliminary), or
+      \li 'Preliminary' or the value of config variable `preliminary'
+          (\\preliminary), or
       \li The description adopted from associated module's state:
           \c {\modulestate {<description>}}.
     \endlist
@@ -1139,15 +1248,15 @@ std::optional<QString> formatStatus(const Node *node, QDocDatabase *qdb)
         if (!status.isEmpty())
             return {status};
     }
-    const auto since = node->deprecatedSince();
-    if (node->status() == Node::Deprecated) {
+    const auto &since = node->deprecatedSince();
+    if (node->status() == Status::Deprecated) {
         status = u"Deprecated"_s;
         if (!since.isEmpty())
             status += " since %1"_L1.arg(since);
     } else if (!since.isEmpty()) {
         status = "Until %1"_L1.arg(since);
-    } else if (node->status() == Node::Preliminary) {
-        status = u"Preliminary"_s;
+    } else if (node->status() == Status::Preliminary) {
+        status = Config::instance().get(CONFIG_PRELIMINARY).asString();
     } else if (const auto collection = qdb->getModuleNode(node); collection) {
         status = collection->state();
     }
@@ -1159,8 +1268,15 @@ void Generator::generateSince(const Node *node, CodeMarker *marker)
 {
     if (!node->since().isEmpty()) {
         Text text;
-        text << Atom::ParaLeft << "This " << typeString(node) << " was introduced in "
-             << formatSince(node) << "." << Atom::ParaRight;
+        if (node->isSharedCommentNode()) {
+            const auto &collective = static_cast<const SharedCommentNode *>(node)->collective();
+            QString typeStr = typeString(collective.first(), collective.size() > 1);
+            text << Atom::ParaLeft << "These " << typeStr << " were introduced in "
+                 << formatSince(node) << "." << Atom::ParaRight;
+        } else {
+            text << Atom::ParaLeft << "This " << typeString(node) << " was introduced in "
+                 << formatSince(node) << "." << Atom::ParaRight;
+        }
         generateText(text, node, marker);
     }
 }
@@ -1175,12 +1291,14 @@ void Generator::generateNoexceptNote(const Node* node, CodeMarker* marker) {
 
     std::size_t counter{1};
     for (const Node* node : nodes) {
-        if (node->isFunction(Node::CPP)) {
-            if (auto exception_info = static_cast<const FunctionNode*>(node)->getNoexcept(); exception_info && !(*exception_info).isEmpty()) {
+        if (node->isFunction(Genus::CPP)) {
+            if (const auto &exception_info = static_cast<const FunctionNode*>(node)->getNoexcept(); exception_info && !(*exception_info).isEmpty()) {
                 Text text;
                 text << Atom::NoteLeft
                         << (nodes.size() > 1 ? QString::fromStdString(" ("s + std::to_string(counter) + ")"s) : QString::fromStdString("This ") + typeString(node))
-                        << " does not throw any exception when " << "\"" << *exception_info << "\"" << " is true."
+                        << " is noexcept when "
+                        << Atom(Atom::C, marker->markedUpCode(*exception_info, nullptr, Location()))
+                        << " is " << Atom(Atom::C, "true") << "."
                     << Atom::NoteRight;
                 generateText(text, node, marker);
             }
@@ -1195,7 +1313,7 @@ void Generator::generateStatus(const Node *node, CodeMarker *marker)
     Text text;
 
     switch (node->status()) {
-    case Node::Active:
+    case Status::Active:
         // Output the module 'state' description if set.
         if (node->isModule() || node->isQmlModule()) {
             const QString &state = static_cast<const CollectionNode*>(node)->state();
@@ -1207,18 +1325,22 @@ void Generator::generateStatus(const Node *node, CodeMarker *marker)
                 break;
             }
         }
-        if (const auto version = node->deprecatedSince(); !version.isEmpty()) {
+        if (const auto &version = node->deprecatedSince(); !version.isEmpty()) {
             text << Atom::ParaLeft << "This " << typeString(node)
                  << " is scheduled for deprecation in version "
                  << version << "." << Atom::ParaRight;
         }
         break;
-    case Node::Preliminary:
-        text << Atom::ParaLeft << Atom(Atom::FormattingLeft, ATOM_FORMATTING_BOLD) << "This "
-             << typeString(node) << " is under development and is subject to change."
+    case Status::Preliminary: {
+        auto description = Config::instance()
+                                   .get(CONFIG_PRELIMINARY + Config::dot + CONFIG_DESCRIPTION)
+                                   .asString();
+        description.replace('\1'_L1, typeString(node));
+        text << Atom::ParaLeft << Atom(Atom::FormattingLeft, ATOM_FORMATTING_BOLD)
+             << description
              << Atom(Atom::FormattingRight, ATOM_FORMATTING_BOLD) << Atom::ParaRight;
-        break;
-    case Node::Deprecated:
+    } break;
+    case Status::Deprecated:
         text << Atom::ParaLeft;
         if (node->isAggregate())
             text << Atom(Atom::FormattingLeft, ATOM_FORMATTING_BOLD);
@@ -1235,7 +1357,13 @@ void Generator::generateStatus(const Node *node, CodeMarker *marker)
             text << Atom(Atom::FormattingRight, ATOM_FORMATTING_BOLD);
         text << Atom::ParaRight;
         break;
-    case Node::Internal:
+    case Status::Internal:
+    case Status::InternalAuto:
+        if (node->isPageNode())
+            text << Atom::ParaLeft << Atom(Atom::FormattingLeft, ATOM_FORMATTING_BOLD)
+                 << "Part of developer documentation for internal use."
+                 << Atom(Atom::FormattingRight, ATOM_FORMATTING_BOLD) << Atom::ParaRight;
+        break;
     default:
         break;
     }
@@ -1247,17 +1375,22 @@ void Generator::generateStatus(const Node *node, CodeMarker *marker)
   as the code marker.
 */
 void Generator::generateAddendum(const Node *node, Addendum type, CodeMarker *marker,
-                                 bool generateNote)
+                                 AdmonitionPrefix prefix)
 {
     Q_ASSERT(node && !node->name().isEmpty());
     Text text;
     text << Atom(Atom::DivLeft,
-            "class=\"admonition %1\""_L1.arg(generateNote ? u"note"_s : u"auto"_s));
+                 "class=\"admonition %1\""_L1.arg(prefix == AdmonitionPrefix::Note ? u"note"_s : u"auto"_s));
     text << Atom::ParaLeft;
 
-    if (generateNote) {
-        text  << Atom(Atom::FormattingLeft, ATOM_FORMATTING_BOLD)
-              << "Note: " << Atom(Atom::FormattingRight, ATOM_FORMATTING_BOLD);
+    switch (prefix) {
+    case AdmonitionPrefix::None:
+        break;
+    case AdmonitionPrefix::Note: {
+        text << Atom(Atom::FormattingLeft, ATOM_FORMATTING_BOLD)
+             << "Note: " << Atom(Atom::FormattingRight, ATOM_FORMATTING_BOLD);
+        break;
+        }
     }
 
     switch (type) {
@@ -1291,28 +1424,72 @@ void Generator::generateAddendum(const Node *node, Addendum type, CodeMarker *ma
         if (nodes.isEmpty())
             return;
         std::sort(nodes.begin(), nodes.end(), Node::nodeNameLessThan);
+
+        // Group properties by their role for more concise output
+        QMap<PropertyNode::FunctionRole, QList<const PropertyNode *>> roleGroups;
         for (const auto *n : std::as_const(nodes)) {
-            QString msg;
             const auto *pn = static_cast<const PropertyNode *>(n);
-            switch (pn->role(fn)) {
+            if (pn->isInAPI()) {
+                PropertyNode::FunctionRole role = pn->role(fn);
+                roleGroups[role].append(pn);
+            }
+        }
+
+        if (roleGroups.isEmpty())
+            return;
+
+        // Generate text for each role group in an explicit order
+        static constexpr PropertyNode::FunctionRole roleOrder[] = {
+             PropertyNode::FunctionRole::Getter,
+             PropertyNode::FunctionRole::Setter,
+             PropertyNode::FunctionRole::Resetter,
+             PropertyNode::FunctionRole::Notifier,
+             PropertyNode::FunctionRole::Bindable,
+        };
+        for (auto role : roleOrder) {
+            const auto it = roleGroups.constFind(role);
+            if (it == roleGroups.cend())
+                continue;
+
+            const auto &properties = it.value();
+
+            QString msg;
+            switch (role) {
             case PropertyNode::FunctionRole::Getter:
-                msg = QStringLiteral("Getter function");
+                msg = u"Getter function"_s;
                 break;
             case PropertyNode::FunctionRole::Setter:
-                msg = QStringLiteral("Setter function");
+                msg = u"Setter function"_s;
                 break;
             case PropertyNode::FunctionRole::Resetter:
-                msg = QStringLiteral("Resetter function");
+                msg = u"Resetter function"_s;
                 break;
             case PropertyNode::FunctionRole::Notifier:
-                msg = QStringLiteral("Notifier signal");
+                msg = u"Notifier signal"_s;
+                break;
+            case PropertyNode::FunctionRole::Bindable:
+                msg = u"Bindable function"_s;
                 break;
             default:
                 continue;
             }
-            text << msg << " for property " << Atom(Atom::Link, pn->name())
-             << Atom(Atom::FormattingLeft, ATOM_FORMATTING_LINK) << pn->name()
-             << Atom(Atom::FormattingRight, ATOM_FORMATTING_LINK) << ". ";
+
+            if (properties.size() == 1) {
+                const auto *pn = properties.first();
+                text << msg << u" for property "_s << Atom(Atom::Link, pn->name())
+                     << Atom(Atom::FormattingLeft, ATOM_FORMATTING_LINK) << pn->name()
+                     << Atom(Atom::FormattingRight, ATOM_FORMATTING_LINK) << u". "_s;
+            } else {
+                text << msg << u" for properties "_s;
+                for (qsizetype i = 0; i < properties.size(); ++i) {
+                    const auto *pn = properties.at(i);
+                    text << Atom(Atom::Link, pn->name())
+                         << Atom(Atom::FormattingLeft, ATOM_FORMATTING_LINK) << pn->name()
+                         << Atom(Atom::FormattingRight, ATOM_FORMATTING_LINK)
+                         << TextUtils::separator(i, properties.size());
+                }
+                text << u" "_s;
+            }
         }
         break;
     }
@@ -1323,6 +1500,53 @@ void Generator::generateAddendum(const Node *node, Addendum type, CodeMarker *ma
              << Atom(Atom::FormattingLeft, ATOM_FORMATTING_LINK) << "QProperty"
              << Atom(Atom::FormattingRight, ATOM_FORMATTING_LINK);
         text << " bindings.";
+        break;
+    }
+    case OverloadNote:
+    {
+        const auto *func = static_cast<const FunctionNode *>(node);
+
+        // Primary overloads should not display any overload note text
+        if (func->isPrimaryOverload())
+            return;
+
+        if (func->isSignal() || func->isSlot()) {
+            QString functionType = func->isSignal() ? "signal" : "slot";
+            const QString &configKey = func->isSignal() ? "overloadedsignalstarget" : "overloadedslotstarget";
+            const QString &defaultTarget = func->isSignal() ? "connecting-overloaded-signals" : "connecting-overloaded-slots";
+            const QString &linkTarget = Config::instance().get(configKey).asString(defaultTarget);
+
+            text << "This " << functionType << " is overloaded. ";
+
+            QString snippet = generateOverloadSnippet(func);
+            if (!snippet.isEmpty()) {
+                text << "To connect to this " << functionType << ":\n\n"
+                     << Atom(Atom::Code, snippet) << "\n";
+            }
+
+            if (!linkTarget.isEmpty()) {
+                text << "For more examples and approaches, see "
+                     << Atom(Atom::Link, linkTarget)
+                     << Atom(Atom::FormattingLeft, ATOM_FORMATTING_LINK)
+                     << "connecting to overloaded " << functionType << "s"
+                     << Atom(Atom::FormattingRight, ATOM_FORMATTING_LINK) << ".";
+            }
+        } else {
+            const auto &args = node->doc().overloadList();
+            if (args.first().first.isEmpty()) {
+                text << "This is an overloaded function.";
+            } else {
+                QString target = args.first().first;
+                // If the target is not fully qualified and we have a parent class context,
+                // attempt to qualify it to improve link resolution
+                if (!target.contains("::")) {
+                    const auto *parent = node->parent();
+                    if (parent && (parent->isClassNode() || parent->isNamespace()))
+                        target = parent->name() + "::" + target;
+                }
+                text << "This function overloads " << Atom(Atom::AutoLink, target) << ".";
+            }
+        }
         break;
     }
     default:
@@ -1528,7 +1752,7 @@ bool Generator::generateComparisonCategory(const Node *node, CodeMarker *marker)
         return false;
 
     Text text;
-    text << Atom::ParaLeft << "This %1 is "_L1.arg(typeString(node))
+    text << Atom::ParaLeft << "%1 is "_L1.arg(node->plainFullName())
          << Atom(Atom::FormattingLeft, ATOM_FORMATTING_ITALIC)
          << QString::fromStdString(comparisonCategoryAsString(category))
          << ((category == ComparisonCategory::Equality) ? "-"_L1 : "ly "_L1)
@@ -1540,96 +1764,103 @@ bool Generator::generateComparisonCategory(const Node *node, CodeMarker *marker)
 }
 
 /*!
-    Generates a list of types that compare to \a node with the comparison
-    category that applies for the relationship, followed by (an optional)
-    descriptive text.
+    Generates a table of comparison categories for \a node, combining both
+    self-comparison (from \\compares) and comparisons with other types
+    (from \\compareswith).
+
+    If the node has a comparison category set via \\compares, it appears
+    as the first row in the table. Subsequent rows come from \\compareswith
+    entries.
+
+    The Description column is only included if at least one \\compareswith
+    entry has descriptive content.
 
     Returns \c true if text was generated, \c false otherwise.
  */
-bool Generator::generateComparisonList(const Node *node)
+bool Generator::generateComparisonTable(const Node *node)
 {
     Q_ASSERT(node);
-    if (!node->doc().comparesWithMap())
+
+    const auto selfCategory = node->comparisonCategory();
+    const auto *map = node->doc().comparesWithMap();
+
+    const bool hasSelfComparison = (selfCategory != ComparisonCategory::None);
+    const bool hasComparesWithEntries = (map && !map->isEmpty());
+
+    if (!hasSelfComparison && !hasComparesWithEntries)
         return false;
 
-    Text relationshipText;
-    for (auto [key, description] : node->doc().comparesWithMap()->asKeyValueRange()) {
-        const QString &category = QString::fromStdString(comparisonCategoryAsString(key));
-
-        relationshipText << Atom::ParaLeft << "This %1 is "_L1.arg(typeString(node))
-                         << Atom(Atom::FormattingLeft, ATOM_FORMATTING_BOLD) << category
-                         << ((key == ComparisonCategory::Equality) ? "-"_L1 : "ly "_L1)
-                         << "comparable"_L1
-                         << Atom(Atom::FormattingRight, ATOM_FORMATTING_BOLD)
-                         << " with "_L1;
-
-        const QStringList types{description.firstAtom()->string().split(';'_L1)};
-        for (const auto &name : types)
-            relationshipText << Atom(Atom::AutoLink, name)
-                             << Utilities::separator(types.indexOf(name), types.size());
-
-        relationshipText << Atom(Atom::ParaRight) << description;
+    bool hasDescriptions = false;
+    if (hasComparesWithEntries) {
+        for (const auto &description : *map) {
+            if (description.firstAtom()->next() != description.lastAtom()) {
+                hasDescriptions = true;
+                break;
+            }
+        }
     }
-
-    generateText(relationshipText, node, nullptr);
-    return !relationshipText.isEmpty();
-}
-
-/*!
-  Returns the string containing an example code of the input node,
-  if it is an overloaded signal. Otherwise, returns an empty string.
- */
-QString Generator::getOverloadedSignalCode(const Node *node)
-{
-    if (!node->isFunction())
-        return QString();
-    const auto func = static_cast<const FunctionNode *>(node);
-    if (!func->isSignal() || !func->hasOverloads())
-        return QString();
-
-    // Compute a friendly name for the object of that instance.
-    // e.g:  "QAbstractSocket" -> "abstractSocket"
-    QString objectName = node->parent()->name();
-    if (objectName.size() >= 2) {
-        if (objectName[0] == 'Q')
-            objectName = objectName.mid(1);
-        objectName[0] = objectName[0].toLower();
-    }
-
-    // We have an overloaded signal, show an example. Note, for const
-    // overloaded signals, one should use Q{Const,NonConst}Overload, but
-    // it is very unlikely that we will ever have public API overloading
-    // signals by const.
-    QString code = "connect(" + objectName + ", QOverload<";
-    code += func->parameters().generateTypeList();
-    code += ">::of(&" + func->parent()->name() + "::" + func->name() + "),\n    [=](";
-    code += func->parameters().generateTypeAndNameList();
-    code += "){ /* ... */ });";
-
-    return code;
-}
-
-/*!
-    If the node is an overloaded signal, add a node with an example on how to connect to it
- */
-void Generator::generateOverloadedSignal(const Node *node, CodeMarker *marker)
-{
-    QString code = getOverloadedSignalCode(node);
-    if (code.isEmpty())
-        return;
 
     Text text;
-    text << Atom::ParaLeft << Atom(Atom::FormattingLeft, ATOM_FORMATTING_BOLD)
-         << "Note:" << Atom(Atom::FormattingRight, ATOM_FORMATTING_BOLD) << " Signal "
-         << Atom(Atom::FormattingLeft, ATOM_FORMATTING_ITALIC) << node->name()
-         << Atom(Atom::FormattingRight, ATOM_FORMATTING_ITALIC)
-         << " is overloaded in this class. "
-            "To connect to this signal by using the function pointer syntax, Qt "
-            "provides a convenient helper for obtaining the function pointer as "
-            "shown in this example:"
-         << Atom(Atom::Code, marker->markedUpCode(code, node, node->location()));
 
-    generateText(text, node, marker);
+    text << Atom::ParaLeft
+         << Atom(Atom::FormattingLeft, ATOM_FORMATTING_BOLD)
+         << "%1 Comparisons"_L1.arg(node->plainFullName())
+         << Atom(Atom::FormattingRight, ATOM_FORMATTING_BOLD)
+         << Atom::ParaRight;
+
+    text << Atom(Atom::TableLeft, "generic"_L1);
+
+    text << Atom::TableHeaderLeft
+         << Atom::TableItemLeft << "Category"_L1 << Atom::TableItemRight
+         << Atom::TableItemLeft << "Comparable Types"_L1 << Atom::TableItemRight;
+    if (hasDescriptions)
+        text << Atom::TableItemLeft << "Description"_L1 << Atom::TableItemRight;
+    text << Atom::TableHeaderRight;
+
+    // First row: self-comparison from \compares
+    if (hasSelfComparison) {
+        const QString &category = QString::fromStdString(comparisonCategoryAsString(selfCategory));
+
+        text << Atom::TableRowLeft;
+        text << Atom::TableItemLeft << category << Atom::TableItemRight;
+        text << Atom::TableItemLeft
+             << Atom(Atom::String, node->plainFullName()) << Atom::TableItemRight;
+        if (hasDescriptions)
+            text << Atom::TableItemLeft << Atom::TableItemRight;
+        text << Atom::TableRowRight;
+    }
+
+    // Subsequent rows: \compareswith entries
+    if (hasComparesWithEntries) {
+        for (auto [key, description] : map->asKeyValueRange()) {
+            const QString &category = QString::fromStdString(comparisonCategoryAsString(key));
+
+            text << Atom::TableRowLeft;
+
+            text << Atom::TableItemLeft << category << Atom::TableItemRight;
+
+            text << Atom::TableItemLeft;
+            const QStringList types{description.firstAtom()->string().split(';'_L1)};
+            for (const auto &name : types)
+                text << Atom(Atom::AutoLink, name)
+                     << TextUtils::separator(types.indexOf(name), types.size());
+            text << Atom::TableItemRight;
+
+            if (hasDescriptions) {
+                text << Atom::TableItemLeft;
+                if (description.firstAtom()->next() != description.lastAtom())
+                    text << Text::subText(description.firstAtom()->next(), description.lastAtom());
+                text << Atom::TableItemRight;
+            }
+
+            text << Atom::TableRowRight;
+        }
+    }
+
+    text << Atom::TableRight;
+
+    generateText(text, node, nullptr);
+    return !text.isEmpty();
 }
 
 /*!
@@ -1643,6 +1874,18 @@ void Generator::generateDocs()
 
 Generator *Generator::generatorForFormat(const QString &format)
 {
+    // First, check the OutputProducerRegistry for producers.
+    // This supports both Generator-based producers (which register themselves)
+    // and future non-Generator OutputProducer implementations.
+    if (auto *producer = OutputProducerRegistry::instance().producerForFormat(format)) {
+        // TODO: All registered producers are Generators, but this will
+        // change as we migrate to OutputProducer-based implementations.
+        if (auto *gen = dynamic_cast<Generator *>(producer))
+            return gen;
+    }
+
+    // Fallback: Check the legacy s_generators list for unregistered generators.
+    // This should not normally be reached, but provides backward compatibility.
     for (const auto &generator : std::as_const(s_generators)) {
         if (generator->format() == format)
             return generator;
@@ -1683,6 +1926,7 @@ void Generator::initialize()
     for (auto &g : s_generators) {
         if (s_outputFormats.contains(g->format())) {
             s_currentGenerator = g;
+            OutputProducerRegistry::instance().registerProducer(g);
             g->initializeGenerator();
         }
     }
@@ -1765,26 +2009,24 @@ void Generator::copyTemplateFiles(const QString &configVar, const QString &subDi
     QStringList files = config.getCanonicalPathList(configVar, Config::Validate);
     const auto &loc = config.get(configVar).location();
     if (!files.isEmpty()) {
-        QDir dirInfo;
         // TODO: [uncentralized-output-directory-structure]
-        // As with other places in the generation pass, the details of
-        // where something is saved in the output directory are spread
-        // to whichever part of the generation does the saving.
-        // It is hence complex to build a model of how an output
-        // directory looks like, as the knowledge has no specific
-        // entry point or chain-path that can be followed in full.
-        // Each of those operations should be centralized in a system
-        // that uniquely knows what the format of the output-directory
-        // is and how to perform operations on it.
-        // Later, move this operation to that centralized system.
-        QString templateDir = s_outDir + QLatin1Char('/') + subDir;
-        if (!dirInfo.exists(templateDir) && !dirInfo.mkdir(templateDir)) {
-            // TODO: [uncentralized-admonition]
-            loc.fatal(QStringLiteral("Cannot create %1 directory '%2'").arg(subDir, templateDir));
-        } else {
-            for (const auto &file : files) {
-                if (!file.isEmpty())
-                    Config::copyFile(loc, file, file, templateDir);
+        // OutputDirectory provides the centralized system for managing output
+        // directory structure in Generator base class methods. However, the
+        // format-specific generators (HtmlGenerator, DocBookGenerator,
+        // WebXMLGenerator) still manually construct image paths using string
+        // concatenation and direct Config::copyFile() calls. These should be
+        // refactored to use OutputDirectory for consistency and security.
+
+        const OutputDirectory outDir =
+                OutputDirectory::ensure(s_outDir, loc);
+
+        const OutputDirectory templateDir =
+                outDir.ensureSubdir(subDir, loc);
+
+        for (const auto &file : files) {
+            if (!file.isEmpty()) {
+                const QFileInfo fi(file);
+                Config::copyFile(loc, fi.absoluteFilePath(), fi.fileName(), templateDir.path());
             }
         }
     }
@@ -1805,6 +2047,8 @@ void Generator::initializeFormat()
 
     if (s_outputFormats.isEmpty())
         return;
+    if (s_redirectDocumentationToDevNull)
+        return;
 
     s_outDir = config.getOutputDir(format());
     if (s_outDir.isEmpty()) {
@@ -1814,24 +2058,25 @@ void Generator::initializeFormat()
         s_outSubdir = s_outDir.mid(s_outDir.lastIndexOf('/') + 1);
     }
 
-    QDir outputDir(s_outDir);
-    if (outputDir.exists()) {
-        if (!config.generating() && Generator::useOutputSubdirs()) {
-            if (!outputDir.isEmpty())
-                Location().error(QStringLiteral("Output directory '%1' exists but is not empty")
-                                .arg(s_outDir));
-        }
-    } else if (!outputDir.mkpath(QStringLiteral("."))) {
-        Location().fatal(QStringLiteral("Cannot create output directory '%1'").arg(s_outDir));
+    // Ensure output directory exists before proceeding
+    const OutputDirectory outputDir =
+            OutputDirectory::ensure(s_outDir, Location());
+
+    // Check if the directory is empty when required
+    if (!config.generating() && Generator::useOutputSubdirs()) {
+        if (!outputDir.toQDir().isEmpty())
+            Location().error("Output directory '%1' exists but is not empty"_L1.arg(s_outDir));
     }
 
     // Output directory exists, which is enough for prepare phase.
     if (config.preparing())
         return;
 
-    const QLatin1String imagesDir("images");
-    if (!outputDir.exists(imagesDir) && !outputDir.mkdir(imagesDir))
-        Location().fatal(QStringLiteral("Cannot create images directory '%1'").arg(outputDir.filePath(imagesDir)));
+    auto imagesDir = config.get(CONFIG_IMAGESOUTPUTDIR).asString(u"images"_s);
+    // Ensure images subdirectory exists
+    [[maybe_unused]] const OutputDirectory imagesOutputDir =
+            outputDir.ensureSubdir(imagesDir, Location());
+    s_imagesOutDir = std::move(imagesDir);
 
     copyTemplateFiles(format() + Config::dot + CONFIG_STYLESHEETS, "style");
     copyTemplateFiles(format() + Config::dot + CONFIG_SCRIPTS, "scripts");
@@ -1845,11 +2090,12 @@ void Generator::initializeFormat()
 }
 
 /*!
-  Updates the generator's m_showInternal from the Config.
+  No-op base implementation. Subclasses may override to perform
+  generator-specific initialization.
  */
 void Generator::initializeGenerator()
 {
-    m_showInternal = Config::instance().showInternal();
+    // Default implementation does nothing
 }
 
 bool Generator::matchAhead(const Atom *atom, Atom::AtomType expectedAtomType)
@@ -1877,9 +2123,9 @@ QString Generator::outputPrefix(const Node *node)
     // Omit prefix for module pages
     if (node->isPageNode() && !node->isCollectionNode()) {
         switch (node->genus()) {
-        case Node::QML:
+        case Genus::QML:
             return s_outputPrefixes[u"QML"_s];
-        case Node::CPP:
+        case Genus::CPP:
             return s_outputPrefixes[u"CPP"_s];
         default:
             break;
@@ -1892,9 +2138,9 @@ QString Generator::outputSuffix(const Node *node)
 {
     if (node->isPageNode()) {
         switch (node->genus()) {
-        case Node::QML:
+        case Genus::QML:
             return s_outputSuffixes[u"QML"_s];
-        case Node::CPP:
+        case Genus::CPP:
             return s_outputSuffixes[u"CPP"_s];
         default:
             break;
@@ -2068,18 +2314,19 @@ void Generator::supplementAlsoList(const Node *node, QList<Text> &alsoList)
     }
 }
 
-void Generator::generateEnumValuesForQmlProperty(const Node *node, CodeMarker *marker)
+void Generator::generateEnumValuesForQmlReference(const Node *node, CodeMarker *marker)
 {
-    if (!node->isQmlProperty())
+    const NativeEnum *nativeEnum{nullptr};
+    if (auto *ne_if = dynamic_cast<const NativeEnumInterface *>(node))
+        nativeEnum = ne_if->nativeEnum();
+    else
         return;
 
-    const auto *qpn = static_cast<const QmlPropertyNode*>(node);
-
-    if (!qpn->enumNode())
+    if (!nativeEnum->enumNode())
         return;
 
     // Retrieve atoms from C++ enum \value list
-    const auto body{qpn->enumNode()->doc().body()};
+    const auto body{nativeEnum->enumNode()->doc().body()};
     const auto *start{body.firstAtom()};
     Text text;
 
@@ -2094,16 +2341,18 @@ void Generator::generateEnumValuesForQmlProperty(const Node *node, CodeMarker *m
 
     text << Atom(Atom::ListRight, ATOM_LIST_VALUE);
     if (marker)
-        generateText(text, qpn, marker);
+        generateText(text, node, marker);
     else
-        generateText(text, qpn);
+        generateText(text, node);
 }
 
 void Generator::terminate()
 {
     for (const auto &generator : std::as_const(s_generators)) {
-        if (s_outputFormats.contains(generator->format()))
+        if (s_outputFormats.contains(generator->format())) {
+            OutputProducerRegistry::instance().unregisterProducer(generator);
             generator->terminateGenerator();
+        }
     }
 
     // REMARK: Generators currently, due to recent changes and the
@@ -2134,6 +2383,7 @@ void Generator::terminate()
     s_fmtLeftMaps.clear();
     s_fmtRightMaps.clear();
     s_outDir.clear();
+    s_imagesOutDir.clear();
 }
 
 void Generator::terminateGenerator() {}
@@ -2154,56 +2404,65 @@ QString Generator::trimmedTrailing(const QString &string, const QString &prefix,
     return trimmed;
 }
 
-QString Generator::typeString(const Node *node)
+QString Generator::typeString(const Node *node, bool plural)
 {
     switch (node->nodeType()) {
-    case Node::Namespace:
-        return "namespace";
-    case Node::Class:
-        return "class";
-    case Node::Struct:
-        return "struct";
-    case Node::Union:
-        return "union";
-    case Node::QmlType:
-    case Node::QmlValueType:
-        return "type";
-    case Node::Page:
-        return "documentation";
-    case Node::Enum:
-        return "enum";
-    case Node::Typedef:
-    case Node::TypeAlias:
-        return "typedef";
-    case Node::Function: {
+    case NodeType::Namespace:
+        return plural ? "namespaces"_L1 : "namespace"_L1;
+    case NodeType::Class:
+        return plural ? "classes"_L1 : "class"_L1;
+    case NodeType::Struct:
+        return plural ? "structs"_L1 : "struct"_L1;
+    case NodeType::Union:
+        return plural ? "unions"_L1 : "union"_L1;
+    case NodeType::QmlType:
+    case NodeType::QmlValueType:
+        return plural ? "types"_L1 : "type"_L1;
+    case NodeType::Page:
+        return "documentation"_L1;
+    case NodeType::Enum:
+        return plural ? "enums"_L1 : "enum"_L1;
+    case NodeType::Typedef:
+    case NodeType::TypeAlias:
+        return plural ? "typedefs"_L1 : "typedef"_L1;
+    case NodeType::Function: {
         const auto fn = static_cast<const FunctionNode *>(node);
         switch (fn->metaness()) {
-        case FunctionNode::QmlSignal:
-            return "signal";
-        case FunctionNode::QmlSignalHandler:
-            return "signal handler";
-        case FunctionNode::QmlMethod:
-            return "method";
-        case FunctionNode::MacroWithParams:
-        case FunctionNode::MacroWithoutParams:
-            return "macro";
+        case Metaness::QmlSignal:
+            return plural ? "signals"_L1 : "signal"_L1;
+        case Metaness::QmlSignalHandler:
+            return plural ? "signal handlers"_L1 : "signal handler"_L1;
+        case Metaness::QmlMethod:
+            return plural ? "methods"_L1 : "method"_L1;
+        case Metaness::MacroWithParams:
+        case Metaness::MacroWithoutParams:
+            return plural ? "macros"_L1 : "macro"_L1;
         default:
             break;
         }
-        return "function";
+        return plural ? "functions"_L1 : "function"_L1;
     }
-    case Node::Property:
-    case Node::QmlProperty:
-        return "property";
-    case Node::Module:
-    case Node::QmlModule:
-        return "module";
-    case Node::SharedComment: {
-        const auto &collective = static_cast<const SharedCommentNode *>(node)->collective();
+    case NodeType::Property:
+    case NodeType::QmlEnum:
+        return plural ? "enumerations"_L1 : "enumeration"_L1;
+    case NodeType::QmlProperty:
+        return plural ? "properties"_L1 : "property"_L1;
+    case NodeType::Module:
+    case NodeType::QmlModule:
+        return plural ? "modules"_L1 : "module"_L1;
+    case NodeType::Variable:
+        return plural ? "variables"_L1 : "variable"_L1;
+    case NodeType::Concept:
+        return plural ? "concepts"_L1 : "concept"_L1;
+    case NodeType::SharedComment: {
+        const auto *shared = static_cast<const SharedCommentNode *>(node);
+        if (shared->isPropertyGroup())
+            return plural ? "property groups"_L1 : "property group"_L1;
+        const auto &collective = shared->collective();
         return collective.first()->nodeTypeString();
     }
     default:
-        return "documentation";
+        return "documentation"_L1;
     }
 }
 
@@ -2211,6 +2470,167 @@ void Generator::unknownAtom(const Atom *atom)
 {
     Location::internalError(QStringLiteral("unknown atom type '%1' in %2 generator")
                                     .arg(atom->typeString(), format()));
+}
+
+/*!
+ * Generate the CMake requisite for the node \a cn, i.e. the the find_package and target_link_libraries
+ * calls to use it.
+ *
+ * If only cmakepackage is set it will look like
+ *
+ * \badcode
+ * find_package(Foo REQUIRED)
+ * target_link_libraries(mytarget PRIVATE Foo:Foo)
+ * \endcode
+ *
+ * If no cmakepackage is set Qt6 is assumed.
+ *
+ * If cmakecomponent is set it will look like
+ *
+ * \badcode
+ * find_package(Qt6 REQUIRED COMPONENTS Bar)
+ * target_link_libraries(mytarget PRIVATE Qt6::Bar)
+ * \endcode
+ *
+ * If cmaketargetitem is set the item in target_link_libraries will be set accordingly
+ *
+ * \badcode
+ * find_package(Qt6 REQUIRED COMPONENTS Bar)
+ * target_link_libraries(mytarget PRIVATE My::Target)
+ * \endcode
+ *
+ * Returns a pair consisting of the find package line and link libraries line.
+ *
+ * If no sensible requisite can be created (i.e. both cmakecomponent and cmakepackage are unset)
+ * \c std::nullopt is returned.
+ */
+std::optional<std::pair<QString, QString>> Generator::cmakeRequisite(const CollectionNode *cn)
+{
+    if (!cn || (cn->cmakeComponent().isEmpty() && cn->cmakePackage().isEmpty())) {
+        return {};
+    }
+
+    const QString package =
+        cn->cmakePackage().isEmpty() ? "Qt" + QString::number(QT_VERSION_MAJOR) : cn->cmakePackage();
+
+    QString findPackageText;
+    if (cn->cmakeComponent().isEmpty()) {
+        findPackageText = "find_package(" + package + " REQUIRED)";
+    } else {
+        findPackageText = "find_package(" + package + " REQUIRED COMPONENTS " + cn->cmakeComponent() + ")";
+    }
+
+    QString targetText;
+    if (cn->cmakeTargetItem().isEmpty()) {
+        if (cn->cmakeComponent().isEmpty()) {
+            targetText = package + "::" + package;
+        } else {
+            targetText = package + "::" + cn->cmakeComponent();
+        }
+    } else {
+        targetText = cn->cmakeTargetItem();
+    }
+
+    const QString targetLinkLibrariesText = "target_link_libraries(mytarget PRIVATE " + targetText + ")";
+    const QStringList cmakeInfo { findPackageText, targetLinkLibrariesText };
+
+    return std::make_pair(findPackageText, targetLinkLibrariesText);
+}
+
+/*!
+    \brief Adds a formatted link to the specified \a text stream.
+
+    This function creates a sequence of Atom objects that together form a link
+    and appends them to the \a text. The \a nodeRef parameter specifies the
+    target of the link (typically obtained via stringForNode()), and \a linkText
+    specifies the visible text for the link.
+
+    \sa Atom, stringForNode()
+*/
+void Generator::addNodeLink(Text &text, const QString &nodeRef, const QString &linkText) {
+    text << Atom(Atom::LinkNode, nodeRef)
+         << Atom(Atom::FormattingLeft, ATOM_FORMATTING_LINK)
+         << Atom(Atom::String, linkText)
+         << Atom(Atom::FormattingRight, ATOM_FORMATTING_LINK);
+}
+
+/*!
+    \overload
+
+    This convenience overload automatically obtains the node reference string
+    using stringForNode(). If \a linkText is empty, the node's name is used as
+    the link text; otherwise, the specified \a linkText is used.
+
+    \sa stringForNode()
+*/
+void Generator::addNodeLink(Text &text, const INode *node, const QString &linkText) {
+    addNodeLink(
+        text,
+        Utilities::stringForNode(node),
+        linkText.isEmpty() ? node->name() : linkText
+    );
+}
+
+/*!
+  Generates a contextual code snippet for connecting to an overloaded signal or
+  slot. Returns an empty string if the function is not a signal or slot.
+
+  For signals, the snippet shows the signal in the second argument position of
+  connect(). For slots, the snippet shows the slot in the fourth argument
+  position (receiver side).
+*/
+QString Generator::generateOverloadSnippet(const FunctionNode *func)
+{
+    if (!func || (!func->isSignal() && !func->isSlot()))
+        return QString();
+
+    QString className = func->parent()->name();
+    QString functionName = func->name();
+    QString typeList = func->parameters().generateTypeList();
+    QString typeAndNameList = func->parameters().generateTypeAndNameList();
+    QString nameList = func->parameters().generateNameList();
+    QString objectName = generateObjectName(className);
+
+    QString snippet;
+
+    if (func->isSignal()) {
+        snippet = QString(
+            "// Connect using qOverload:\n"
+            "connect(%1, qOverload<%2>(&%3::%4),\n"
+            "        receiver, &ReceiverClass::slot);\n\n"
+            "// Or using a lambda:\n"
+            "connect(%1, qOverload<%2>(&%3::%4),\n"
+            "        this, [](%5) { /* handle %4 */ });")
+            .arg(objectName, typeList, className, functionName, typeAndNameList);
+    } else {
+        snippet = QString(
+            "// Connect using qOverload:\n"
+            "connect(sender, &SenderClass::signal,\n"
+            "        %1, qOverload<%2>(&%3::%4));\n\n"
+            "// Or using a lambda as wrapper:\n"
+            "connect(sender, &SenderClass::signal,\n"
+            "        %1, [receiver = %1](%5) { receiver->%4(%6); });")
+            .arg(objectName, typeList, className, functionName, typeAndNameList, nameList);
+    }
+
+    return snippet;
+}
+
+/*!
+  Generates an appropriate object name for code snippets based on the class name.
+  Converts class names like "QComboBox" to "comboBox".
+*/
+QString Generator::generateObjectName(const QString &className)
+{
+    QString name = className;
+
+    if (name.startsWith('Q') && name.length() > 1)
+        name.remove(0, 1);
+
+    if (!name.isEmpty())
+        name[0] = name[0].toLower();
+
+    return name;
 }
 
 QT_END_NAMESPACE

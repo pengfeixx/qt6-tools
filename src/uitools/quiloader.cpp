@@ -1,6 +1,6 @@
 // Copyright (C) 2020 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
-
+// Qt-Security score:significant reason:default
 
 #include "quiloader.h"
 #include "quiloader_p.h"
@@ -9,19 +9,31 @@
 
 #include <formbuilder.h>
 #include <formbuilderextra_p.h>
+#include <objectutils_p.h>
 #include <textbuilder_p.h>
 #include <ui4_p.h>
 
 #include <QtWidgets/qapplication.h>
 #include <QtWidgets/qlayout.h>
 #include <QtWidgets/qwidget.h>
-#include <QtWidgets/qtabwidget.h>
-#include <QtWidgets/qtreewidget.h>
-#include <QtWidgets/qlistwidget.h>
-#include <QtWidgets/qtablewidget.h>
-#include <QtWidgets/qtoolbox.h>
-#include <QtWidgets/qcombobox.h>
-#include <QtWidgets/qfontcombobox.h>
+#if QT_CONFIG(tabwidget)
+#   include <QtWidgets/qtabwidget.h>
+#endif
+#if QT_CONFIG(treewidget)
+#  include <QtWidgets/qtreewidget.h>
+#endif
+#if QT_CONFIG(listwidget)
+#   include <QtWidgets/qlistwidget.h>
+#endif
+#if QT_CONFIG(tablewidget)
+#  include <QtWidgets/qtablewidget.h>
+#endif
+#if QT_CONFIG(toolbox)
+#  include <QtWidgets/qtoolbox.h>
+#endif
+#if QT_CONFIG(combobox)
+#  include <QtWidgets/qcombobox.h>
+#endif
 
 #include <QtGui/qaction.h>
 #include <QtGui/qactiongroup.h>
@@ -32,9 +44,11 @@
 #include <QtCore/qdir.h>
 #include <QtCore/qlibraryinfo.h>
 
+#include <algorithm>
+
 QT_BEGIN_NAMESPACE
 
-typedef QMap<QString, bool> widget_map;
+using widget_map = QMap<QString, bool>;
 Q_GLOBAL_STATIC(widget_map, g_widgets)
 
 class QUiLoader;
@@ -93,7 +107,7 @@ QVariant TranslatingTextBuilder::loadText(const DomProperty *text) const
 {
     const DomString *str = text->elementString();
     if (!str)
-        return QVariant();
+        return {};
     if (str->hasAttributeNotr()) {
         const QString notr = str->attributeNotr();
         if (notr == QStringLiteral("true") || notr == QStringLiteral("yes"))
@@ -111,7 +125,7 @@ QVariant TranslatingTextBuilder::loadText(const DomProperty *text) const
 QVariant TranslatingTextBuilder::toNativeValue(const QVariant &value) const
 {
     if (value.canConvert<QUiTranslatableStringValue>()) {
-        QUiTranslatableStringValue tsv = qvariant_cast<QUiTranslatableStringValue>(value);
+        auto tsv = qvariant_cast<QUiTranslatableStringValue>(value);
         if (!m_trEnabled)
             return QString::fromUtf8(tsv.value().constData());
         return QVariant::fromValue(tsv.translate(m_className, m_idBased));
@@ -136,6 +150,7 @@ const QUiItemRolePair qUiItemRoles[] = {
     { -1 , -1 }
 };
 
+#if QT_CONFIG(treewidget)
 static void recursiveReTranslate(QTreeWidgetItem *item, const QByteArray &class_name, bool idBased)
 {
     const QUiItemRolePair *irs = qUiItemRoles;
@@ -145,7 +160,7 @@ static void recursiveReTranslate(QTreeWidgetItem *item, const QByteArray &class_
         for (unsigned j = 0; irs[j].shadowRole >= 0; j++) {
             QVariant v = item->data(i, irs[j].shadowRole);
             if (v.isValid()) {
-                QUiTranslatableStringValue tsv = qvariant_cast<QUiTranslatableStringValue>(v);
+                auto tsv = qvariant_cast<QUiTranslatableStringValue>(v);
                 item->setData(i, irs[j].realRole, tsv.translate(class_name, idBased));
             }
         }
@@ -155,6 +170,7 @@ static void recursiveReTranslate(QTreeWidgetItem *item, const QByteArray &class_
     for (int i = 0; i < cnt; ++i)
         recursiveReTranslate(item->child(i), class_name, idBased);
 }
+#endif
 
 template<typename T>
 static void reTranslateWidgetItem(T *item, const QByteArray &class_name, bool idBased)
@@ -164,26 +180,19 @@ static void reTranslateWidgetItem(T *item, const QByteArray &class_name, bool id
     for (unsigned j = 0; irs[j].shadowRole >= 0; j++) {
         QVariant v = item->data(irs[j].shadowRole);
         if (v.isValid()) {
-            QUiTranslatableStringValue tsv = qvariant_cast<QUiTranslatableStringValue>(v);
+            auto tsv = qvariant_cast<QUiTranslatableStringValue>(v);
             item->setData(irs[j].realRole, tsv.translate(class_name, idBased));
         }
     }
 }
 
+#if QT_CONFIG(tablewidget)
 static void reTranslateTableItem(QTableWidgetItem *item, const QByteArray &class_name, bool idBased)
 {
     if (item)
         reTranslateWidgetItem(item, class_name, idBased);
 }
-
-#define RETRANSLATE_SUBWIDGET_PROP(mainWidget, setter, propName) \
-    do { \
-        QVariant v = mainWidget->widget(i)->property(propName); \
-        if (v.isValid()) { \
-            QUiTranslatableStringValue tsv = qvariant_cast<QUiTranslatableStringValue>(v); \
-            mainWidget->setter(i, tsv.translate(m_className, m_idBased)); \
-        } \
-    } while (0)
+#endif
 
 class TranslationWatcher: public QObject
 {
@@ -204,33 +213,33 @@ public:
             for (const QByteArray &prop : dynamicPropertyNames) {
                 if (prop.startsWith(PROP_GENERIC_PREFIX)) {
                     const QByteArray propName = prop.mid(sizeof(PROP_GENERIC_PREFIX) - 1);
-                    const QUiTranslatableStringValue tsv =
-                                qvariant_cast<QUiTranslatableStringValue>(o->property(prop));
-                    o->setProperty(propName, tsv.translate(m_className, m_idBased));
+                    const auto tsv =
+                                qvariant_cast<QUiTranslatableStringValue>(o->property(prop.constData()));
+                    o->setProperty(propName.constData(), tsv.translate(m_className, m_idBased));
                 }
             }
             if (0) {
 #if QT_CONFIG(tabwidget)
-            } else if (QTabWidget *tabw = qobject_cast<QTabWidget*>(o)) {
+            } else if (auto *tabw = qobject_cast<QTabWidget*>(o)) {
                 const int cnt = tabw->count();
                 for (int i = 0; i < cnt; ++i) {
-                    RETRANSLATE_SUBWIDGET_PROP(tabw, setTabText, PROP_TABPAGETEXT);
+                    retranslateSubwidgetProperty(tabw, &QTabWidget::setTabText, i, PROP_TABPAGETEXT);
 #if QT_CONFIG(tooltip)
-                    RETRANSLATE_SUBWIDGET_PROP(tabw, setTabToolTip, PROP_TABPAGETOOLTIP);
+                    retranslateSubwidgetProperty(tabw, &QTabWidget::setTabToolTip, i, PROP_TABPAGETOOLTIP);
 # endif
 #if QT_CONFIG(whatsthis)
-                    RETRANSLATE_SUBWIDGET_PROP(tabw, setTabWhatsThis, PROP_TABPAGEWHATSTHIS);
+                    retranslateSubwidgetProperty(tabw, &QTabWidget::setTabWhatsThis, i, PROP_TABPAGEWHATSTHIS);
 # endif
                 }
 #endif
 #if QT_CONFIG(listwidget)
-            } else if (QListWidget *listw = qobject_cast<QListWidget*>(o)) {
+            } else if (auto *listw = qobject_cast<QListWidget*>(o)) {
                 const int cnt = listw->count();
                 for (int i = 0; i < cnt; ++i)
                     reTranslateWidgetItem(listw->item(i), m_className, m_idBased);
 #endif
 #if QT_CONFIG(treewidget)
-            } else if (QTreeWidget *treew = qobject_cast<QTreeWidget*>(o)) {
+            } else if (auto *treew = qobject_cast<QTreeWidget*>(o)) {
                 if (QTreeWidgetItem *item = treew->headerItem())
                     recursiveReTranslate(item, m_className, m_idBased);
                 const int cnt = treew->topLevelItemCount();
@@ -240,7 +249,7 @@ public:
                 }
 #endif
 #if QT_CONFIG(tablewidget)
-            } else if (QTableWidget *tablew = qobject_cast<QTableWidget*>(o)) {
+            } else if (auto *tablew = qobject_cast<QTableWidget*>(o)) {
                 const int row_cnt = tablew->rowCount();
                 const int col_cnt = tablew->columnCount();
                 for (int j = 0; j < col_cnt; ++j)
@@ -252,31 +261,44 @@ public:
                 }
 #endif
 #if QT_CONFIG(combobox)
-            } else if (QComboBox *combow = qobject_cast<QComboBox*>(o)) {
-                if (!qobject_cast<QFontComboBox*>(o)) {
+            } else if (auto *combow = qobject_cast<QComboBox*>(o)) {
+                if (!QFormBuilderExtra::isQFontComboBox(combow)) {
                     const int cnt = combow->count();
                     for (int i = 0; i < cnt; ++i) {
                         const QVariant v = combow->itemData(i, Qt::DisplayPropertyRole);
                         if (v.isValid()) {
-                            QUiTranslatableStringValue tsv = qvariant_cast<QUiTranslatableStringValue>(v);
+                            auto tsv = qvariant_cast<QUiTranslatableStringValue>(v);
                             combow->setItemText(i, tsv.translate(m_className, m_idBased));
                         }
                     }
                 }
 #endif
 #if QT_CONFIG(toolbox)
-            } else if (QToolBox *toolw = qobject_cast<QToolBox*>(o)) {
+            } else if (auto *toolw = qobject_cast<QToolBox*>(o)) {
                 const int cnt = toolw->count();
                 for (int i = 0; i < cnt; ++i) {
-                    RETRANSLATE_SUBWIDGET_PROP(toolw, setItemText, PROP_TOOLITEMTEXT);
+                    retranslateSubwidgetProperty(toolw, &QToolBox::setItemText, i, PROP_TOOLITEMTEXT);
 #if QT_CONFIG(tooltip)
-                    RETRANSLATE_SUBWIDGET_PROP(toolw, setItemToolTip, PROP_TOOLITEMTOOLTIP);
+                    retranslateSubwidgetProperty(toolw, &QToolBox::setItemToolTip, i, PROP_TOOLITEMTOOLTIP);
 # endif
                 }
 #endif
             }
         }
         return false;
+    }
+
+    template <class Widget>
+    void retranslateSubwidgetProperty(Widget *mainWidget,
+                                      void (Widget::*setter)(int, const QString &),
+                                      int i,
+                                      const char *propName) const
+    {
+        QVariant v = mainWidget->widget(i)->property(propName);
+        if (v.isValid()) {
+            const auto tsv = qvariant_cast<QUiTranslatableStringValue>(v);
+            (mainWidget->*setter)(i, tsv.translate(m_className, m_idBased));
+        }
     }
 
 private:
@@ -363,6 +385,14 @@ public:
     QWidget *create(DomWidget *ui_widget, QWidget *parentWidget) override;
     bool addItem(DomWidget *ui_widget, QWidget *widget, QWidget *parentWidget) override;
 
+    template <class Widget>
+    void translateSubwidgetProperty(const QList<DomProperty*> &attributes,
+                                    Widget *mainWidget,
+                                    const QString &attribute,
+                                    int i,
+                                    void (Widget::*setter)(int, const QString &),
+                                    const char *propName) const;
+
 private:
     QByteArray m_class;
     TranslationWatcher *m_trwatch = nullptr;
@@ -373,20 +403,49 @@ static QString convertTranslatable(const DomProperty *p, const QByteArray &class
                                    bool idBased, QUiTranslatableStringValue *strVal)
 {
     if (p->kind() != DomProperty::String)
-        return QString();
+        return {};
     const DomString *dom_str = p->elementString();
     if (!dom_str)
-        return QString();
+        return {};
     if (dom_str->hasAttributeNotr()) {
         const QString notr = dom_str->attributeNotr();
         if (notr == QStringLiteral("yes") || notr == QStringLiteral("true"))
-            return QString();
+            return {};
     }
     strVal->setValue(dom_str->text().toUtf8());
     strVal->setQualifier(idBased ? dom_str->attributeId().toUtf8() : dom_str->attributeComment().toUtf8());
     if (strVal->value().isEmpty() && strVal->qualifier().isEmpty())
-        return QString();
+        return {};
     return strVal->translate(className, idBased);
+}
+
+static DomProperty *attributeByName(const QList<DomProperty*> &attributes,
+                                    const QString &attribute)
+{
+    auto pred = [&attribute](const DomProperty *prop) {
+        return prop->attributeName() == attribute;
+    };
+    auto it = std::find_if(attributes.cbegin(), attributes.cend(), pred);
+    return it != attributes.cend() ? *it : nullptr;
+}
+
+template <class Widget>
+void FormBuilderPrivate::translateSubwidgetProperty(const QList<DomProperty*> &attributes,
+                                                    Widget *mainWidget,
+                                                    const QString &attribute,
+                                                    int i,
+                                                    void (Widget::*setter)(int, const QString &),
+                                                    const char *propName) const
+{
+    if (const auto *p = attributeByName(attributes, attribute)) {
+        QUiTranslatableStringValue strVal;
+        const QString text = convertTranslatable(p, m_class, m_idBased, &strVal);
+        if (!text.isEmpty()) {
+            if (dynamicTr)
+                mainWidget->widget(i)->setProperty(propName, QVariant::fromValue(strVal));
+            (mainWidget->*setter)(i, text);
+        }
+    }
 }
 
 void FormBuilderPrivate::applyProperties(QObject *o, const QList<DomProperty*> &properties)
@@ -411,11 +470,11 @@ void FormBuilderPrivate::applyProperties(QObject *o, const QList<DomProperty*> &
         const QByteArray name = p->attributeName().toUtf8();
         if (dynamicTr) {
             const QByteArray dynname = QByteArray(PROP_GENERIC_PREFIX + name);
-            o->setProperty(dynname, QVariant::fromValue(strVal));
+            o->setProperty(dynname.constData(), QVariant::fromValue(strVal));
             anyTrs = trEnabled;
         }
         if (p->elementString()->text() != text)
-            o->setProperty(name, text);
+            o->setProperty(name.constData(), text);
     }
     if (anyTrs)
         o->installEventFilter(m_trwatch);
@@ -451,7 +510,7 @@ QWidget *FormBuilderPrivate::create(DomWidget *ui_widget, QWidget *parentWidget)
 #endif
 #if QT_CONFIG(combobox)
     } else if (qobject_cast<QComboBox*>(w)) {
-        if (qobject_cast<QFontComboBox*>(w))
+        if (QFormBuilderExtra::isQFontComboBox(w))
             return w;
 #endif
 #if QT_CONFIG(toolbox)
@@ -464,19 +523,6 @@ QWidget *FormBuilderPrivate::create(DomWidget *ui_widget, QWidget *parentWidget)
         w->installEventFilter(m_trwatch);
     return w;
 }
-
-#define TRANSLATE_SUBWIDGET_PROP(mainWidget, attribute, setter, propName) \
-    do { \
-        if (const auto *p = attributes.value(attribute)) { \
-            QUiTranslatableStringValue strVal; \
-            const QString text = convertTranslatable(p, m_class, m_idBased, &strVal); \
-            if (!text.isEmpty()) { \
-                if (dynamicTr) \
-                    mainWidget->widget(i)->setProperty(propName, QVariant::fromValue(strVal)); \
-                mainWidget->setter(i, text); \
-            } \
-        } \
-    } while (0)
 
 bool FormBuilderPrivate::addItem(DomWidget *ui_widget, QWidget *widget, QWidget *parentWidget)
 {
@@ -493,29 +539,32 @@ bool FormBuilderPrivate::addItem(DomWidget *ui_widget, QWidget *widget, QWidget 
 
     if (0) {
 #if QT_CONFIG(tabwidget)
-    } else if (QTabWidget *tabWidget = qobject_cast<QTabWidget*>(parentWidget)) {
-        const DomPropertyHash attributes = propertyMap(ui_widget->elementAttribute());
+    } else if (auto *tabWidget = qobject_cast<QTabWidget*>(parentWidget)) {
         const int i = tabWidget->count() - 1;
-        TRANSLATE_SUBWIDGET_PROP(tabWidget, QFormBuilderStrings::titleAttribute,
-                                 setTabText, PROP_TABPAGETEXT);
+        translateSubwidgetProperty(ui_widget->elementAttribute(), tabWidget,
+                                   QFormBuilderStrings::titleAttribute,
+                                   i, &QTabWidget::setTabText, PROP_TABPAGETEXT);
 #if QT_CONFIG(tooltip)
-        TRANSLATE_SUBWIDGET_PROP(tabWidget, QFormBuilderStrings::toolTipAttribute,
-                                 setTabToolTip, PROP_TABPAGETOOLTIP);
+        translateSubwidgetProperty(ui_widget->elementAttribute(), tabWidget,
+                                   QFormBuilderStrings::toolTipAttribute,
+                                   i, &QTabWidget::setTabToolTip, PROP_TABPAGETOOLTIP);
 # endif
 #if QT_CONFIG(whatsthis)
-        TRANSLATE_SUBWIDGET_PROP(tabWidget, QFormBuilderStrings::whatsThisAttribute,
-                                 setTabWhatsThis, PROP_TABPAGEWHATSTHIS);
+        translateSubwidgetProperty(ui_widget->elementAttribute(), tabWidget,
+                                   QFormBuilderStrings::whatsThisAttribute,
+                                   i, &QTabWidget::setTabWhatsThis, PROP_TABPAGEWHATSTHIS);
 # endif
 #endif
 #if QT_CONFIG(toolbox)
-    } else if (QToolBox *toolBox = qobject_cast<QToolBox*>(parentWidget)) {
-        const DomPropertyHash attributes = propertyMap(ui_widget->elementAttribute());
+    } else if (auto *toolBox = qobject_cast<QToolBox*>(parentWidget)) {
         const int i = toolBox->count() - 1;
-        TRANSLATE_SUBWIDGET_PROP(toolBox, QFormBuilderStrings::labelAttribute,
-                                 setItemText, PROP_TOOLITEMTEXT);
+        translateSubwidgetProperty(ui_widget->elementAttribute(), toolBox,
+                                   QFormBuilderStrings::labelAttribute,
+                                   i, &QToolBox::setItemText, PROP_TOOLITEMTEXT);
 #if QT_CONFIG(tooltip)
-        TRANSLATE_SUBWIDGET_PROP(toolBox, QFormBuilderStrings::toolTipAttribute,
-                                 setItemToolTip, PROP_TOOLITEMTOOLTIP);
+        translateSubwidgetProperty(ui_widget->elementAttribute(), toolBox,
+                                   QFormBuilderStrings::toolTipAttribute,
+                                   i, &QToolBox::setItemToolTip, PROP_TOOLITEMTOOLTIP);
 # endif
 #endif
     }
@@ -544,64 +593,64 @@ void QUiLoaderPrivate::setupWidgetMap() const
     if (!g_widgets()->isEmpty())
         return;
 
-#define DECLARE_WIDGET(a, b) g_widgets()->insert(QLatin1String(#a), true);
-#define DECLARE_LAYOUT(a, b)
-
-#include "widgets.table"
-
-#undef DECLARE_WIDGET
-#undef DECLARE_WIDGET_1
-#undef DECLARE_LAYOUT
+#ifdef QFORMINTERNAL_NAMESPACE
+    const QStringList names = QFormInternal::widgetNames();
+#else
+    const QStringList names = widgetNames();
+#endif
+    for (const QString &name : names)
+        g_widgets()->insert(name, true);
 }
 
 /*!
     \class QUiLoader
     \inmodule QtUiTools
 
-    \brief The QUiLoader class enables standalone applications to
-    dynamically create user interfaces at run-time using the
-    information stored in UI files or specified in plugin paths.
+    \brief Loads and instantiates \QD forms at runtime.
 
-    In addition, you can customize or create your own user interface by
-    deriving your own loader class.
+    Use QUiLoader to dynamically create QWidget-based user interfaces
+    based on the information stored in UI files (created with \QD).
 
-    If you have a custom component or an application that embeds \QD, you can
-    also use the QFormBuilder class provided by the QtDesigner module to create
-    user interfaces from UI files.
-
-    The QUiLoader class provides a collection of functions allowing you to
-    create widgets based on the information stored in UI files (created
-    with \QD) or available in the specified plugin paths. The specified plugin
-    paths can be retrieved using the pluginPaths() function. Similarly, the
-    contents of a UI file can be retrieved using the load() function. For
-    example:
+    The \l load() function reads the content of a UI file, instantiates
+    the widgets described in the file, and returns a pointer to the
+    top-level \l QWidget. This widget can then be shown:
 
     \snippet quiloader/mywidget.cpp 0
 
-    \if !defined(qtforpython)
-    By including the user interface in the form's resources (\c myform.qrc), we
-    ensure that it will be present at run-time:
+    If the instantiation fails, the function returns
+    a \c nullptr; use the \l errorString() function to retrieve a human-readable
+    description of the error that occurred.
 
-    \quotefile quiloader/mywidget.qrc
-    \endif
+    \section2 Loading forms with custom widgets
 
-    The availableWidgets() function returns a QStringList with the class names
-    of the widgets available in the specified plugin paths. To create these
-    widgets, simply use the createWidget() function. For example:
+    If the UI file contains custom widgets implemented in a \QD plugin, loading
+    will fail by default. To work around this, you can subclass \l QUiLoader and
+    override the \l createWidget() function. If this is not possible, you can also
+    let the module load \QD plugins by adding their locations via
+    \l addPluginPath() or the \c QT_PLUGIN_PATH environment variable.
+    See the \l{Creating Custom Widgets for Qt Widgets Designer}
+    page for more details.
+
+    \section2 Loading a particular widget from a UI file
+
+    You can load a specific widget from a UI file, instead of a
+    complete UI file. Use the \l availableWidgets() function to
+    retrieve the names of the available widgets, and the
+    \l createWidget() function to instantiate a specific one. For example:
 
     \snippet quiloader/main.cpp 0
 
-    To make a custom widget available to the loader, you can use the
-    addPluginPath() function; to remove all available widgets, you can call
-    the clearPluginPaths() function.
+    \section2 Customizing the widget creation
 
-    The createAction(), createActionGroup(), createLayout(), and createWidget()
-    functions are used internally by the QUiLoader class whenever it has to
-    create an action, action group, layout, or widget respectively. For that
-    reason, you can subclass the QUiLoader class and reimplement these
-    functions to intervene the process of constructing a user interface. For
-    example, you might want to have a list of the actions created when loading
-    a form or creating a custom widget.
+    The \l createAction(), \l createActionGroup(), \l createLayout(), and
+    \l createWidget() functions are used internally by the QUiLoader class whenever
+    it has to create an action, action group, layout, or widget respectively.
+    You can subclass QUiLoader and reimplement these functions to
+    customize the UI creation workflow. For example, you
+    might want to have a list of the actions created when loading a form or
+    creating a custom widget.
+
+    \section2 Example
 
     For a complete example using the QUiLoader class, see the
     \l{Calculator Builder}.
@@ -645,8 +694,11 @@ QUiLoader::QUiLoader(QObject *parent)
 QUiLoader::~QUiLoader() = default;
 
 /*!
-    Loads a form from the given \a device and creates a new widget with the
-    given \a parentWidget to hold its contents.
+    Instantiates a form from the given \a device. Returns a new QWidget with the
+    given \a parentWidget if successful. Returns \c nullptr otherwise.
+
+    \warning
+    \include security_considerations.qdocinc
 
     \sa createWidget(), errorString()
 */
@@ -687,6 +739,9 @@ void QUiLoader::clearPluginPaths()
     Adds the given \a path to the list of paths in which the loader will search
     when locating plugins.
 
+    \warning Only set paths that you trust. Allowing untrusted users to create
+    or add content in a specified path may lead to security vulnerabilities.
+
     \sa pluginPaths(), clearPluginPaths()
 */
 void QUiLoader::addPluginPath(const QString &path)
@@ -701,8 +756,8 @@ void QUiLoader::addPluginPath(const QString &path)
     widgets returned by the availableWidgets() function.
 
     The function is also used internally by the QUiLoader class whenever it
-    creates a widget. Hence, you can subclass QUiLoader and reimplement this
-    function to intervene process of constructing a user interface or widget.
+    creates a widget. Therefore, you can subclass QUiLoader and reimplement this
+    function to intervene in the process of constructing a user interface or widget.
     However, in your implementation, ensure that you call QUiLoader's version
     first.
 
@@ -719,8 +774,8 @@ QWidget *QUiLoader::createWidget(const QString &className, QWidget *parent, cons
     specified by \a className.
 
     The function is also used internally by the QUiLoader class whenever it
-    creates a widget. Hence, you can subclass QUiLoader and reimplement this
-    function to intervene process of constructing a user interface or widget.
+    creates a layout. Therefore, you can subclass QUiLoader and reimplement this
+    function to intervene in the process of constructing a user interface or widget.
     However, in your implementation, ensure that you call QUiLoader's version
     first.
 
@@ -736,10 +791,10 @@ QLayout *QUiLoader::createLayout(const QString &className, QObject *parent, cons
     Creates a new action group with the given \a parent and \a name.
 
     The function is also used internally by the QUiLoader class whenever it
-    creates a widget. Hence, you can subclass QUiLoader and reimplement this
-    function to intervene process of constructing a user interface or widget.
-    However, in your implementation, ensure that you call QUiLoader's version
-    first.
+    creates an action group. Therefore, you can subclass QUiLoader and reimplement
+    this function to intervene in the process of constructing a user interface or
+    widget. However, in your implementation, ensure that you call QUiLoader's
+    version first.
 
     \sa createAction(), createWidget(), load()
  */
@@ -753,8 +808,8 @@ QActionGroup *QUiLoader::createActionGroup(QObject *parent, const QString &name)
     Creates a new action with the given \a parent and \a name.
 
     The function is also used internally by the QUiLoader class whenever it
-    creates a widget. Hence, you can subclass QUiLoader and reimplement this
-    function to intervene process of constructing a user interface or widget.
+    creates an action. Therefore, you can subclass QUiLoader and reimplement this
+    function to intervene in the process of constructing a user interface or widget.
     However, in your implementation, ensure that you call QUiLoader's version
     first.
 
@@ -767,8 +822,8 @@ QAction *QUiLoader::createAction(QObject *parent, const QString &name)
 }
 
 /*!
-    Returns a list naming all available widgets that can be built using the
-    createWidget() function, i.e all the widgets specified within the given
+    Returns a list of all available widgets that can be built using the
+    createWidget() function, that is, all the widgets specified within the given
     plugin paths.
 
     \sa pluginPaths(), createWidget()
@@ -791,29 +846,29 @@ QStringList QUiLoader::availableWidgets() const
 
 /*!
     \since 4.5
-    Returns a list naming all available layouts that can be built using the
-    createLayout() function
+    Returns a list of all available layouts that can be built using the
+    createLayout() function.
 
     \sa createLayout()
 */
 
 QStringList QUiLoader::availableLayouts() const
 {
-    QStringList rc;
-#define DECLARE_WIDGET(a, b)
-#define DECLARE_LAYOUT(a, b) rc.push_back(QLatin1String(#a));
-
-#include "widgets.table"
-
-#undef DECLARE_WIDGET
-#undef DECLARE_LAYOUT
-    return rc;
+#ifdef QFORMINTERNAL_NAMESPACE
+    return QFormInternal::layoutNames();
+#else
+    return layoutNames();
+#endif
 }
 
 /*!
     Sets the working directory of the loader to \a dir. The loader will look
     for other resources, such as icons and resource files, in paths relative to
     this directory.
+
+    \warning Only set a directory that you trust. Allowing untrusted users to
+    create or add content in the working directory may lead to security
+    vulnerabilities.
 
     \sa workingDirectory()
 */
@@ -854,8 +909,10 @@ void QUiLoader::setLanguageChangeEnabled(bool enabled)
 /*!
     \since 4.5
 
-    Returns true if dynamic retranslation on language change is enabled;
-    returns false otherwise.
+    Returns \c true if dynamic retranslation on language change is enabled;
+    returns \c false otherwise.
+
+    The default is \c false.
 
     \sa setLanguageChangeEnabled()
 */
@@ -888,7 +945,9 @@ void QUiLoader::setTranslationEnabled(bool enabled)
     \internal
     \since 4.5
 
-    Returns true if translation is enabled; returns false otherwise.
+    Returns \c true if translation is enabled; returns \c false otherwise.
+
+    The default is \c true.
 
     \sa setTranslationEnabled()
 */
@@ -900,7 +959,7 @@ bool QUiLoader::isTranslationEnabled() const
 }
 
 /*!
-    Returns a human-readable description of the last error occurred in load().
+    Returns a human-readable description of the last error that occurred in load().
 
     \since 5.0
     \sa load()

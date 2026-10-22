@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 /*! \class AbstractFindWidget
 
@@ -17,21 +18,21 @@
 
 #include "abstractfindwidget_p.h"
 
-#include <QtWidgets/QCheckBox>
-#include <QtWidgets/QLabel>
-#include <QtWidgets/QLayout>
-#include <QtWidgets/QLineEdit>
-#include <QtWidgets/QSpacerItem>
-#include <QtWidgets/QToolButton>
+#include <QtWidgets/qcheckbox.h>
+#include <QtWidgets/qlabel.h>
+#include <QtWidgets/qlayout.h>
+#include <QtWidgets/qlayoutitem.h>
+#include <QtWidgets/qlineedit.h>
+#include <QtWidgets/qtoolbutton.h>
 
-#include <QtGui/QAction>
-#include <QtGui/QKeyEvent>
-#include <QtGui/QShortcut>
+#include <QtGui/qaction.h>
+#include <QtGui/qevent.h>
+#include <QtGui/qshortcut.h>
 
-#include <QtCore/QCoreApplication>
-#include <QtCore/QEvent>
-#include <QtCore/QFile>
-#include <QtCore/QTimer>
+#include <QtCore/qcoreapplication.h>
+#include <QtCore/qcoreevent.h>
+#include <QtCore/qfile.h>
+#include <QtCore/qtimer.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -41,7 +42,7 @@ static QIcon afwCreateIconSet(const QString &name)
 {
     QStringList candidates = QStringList()
         << (QString::fromUtf8(":/qt-project.org/shared/images/") + name)
-#ifdef Q_OS_MAC
+#ifdef Q_OS_MACOS
         << (QString::fromUtf8(":/qt-project.org/shared/images/mac/") + name);
 #else
         << (QString::fromUtf8(":/qt-project.org/shared/images/win/") + name);
@@ -73,7 +74,7 @@ AbstractFindWidget::AbstractFindWidget(FindFlags flags, QWidget *parent)
     } else {
         topLayOut = layOut = new QHBoxLayout(this);
     }
-#ifndef Q_OS_MAC
+#ifndef Q_OS_MACOS
     topLayOut->setSpacing(6);
     topLayOut->setContentsMargins(QMargins());
 #endif

@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #ifndef ABSTRACTFORMEDITOR_H
 #define ABSTRACTFORMEDITOR_H
@@ -8,6 +9,8 @@
 
 #include <QtCore/qobject.h>
 #include <QtCore/qpointer.h>
+
+#include <memory>
 
 QT_BEGIN_NAMESPACE
 
@@ -92,7 +95,7 @@ protected:
     void setExtensionManager(QExtensionManager *extensionManager);
 
 private:
-    QScopedPointer<QDesignerFormEditorInterfacePrivate> d;
+    std::unique_ptr<QDesignerFormEditorInterfacePrivate> d;
 };
 
 QT_END_NAMESPACE

@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #include "widgetfactory_p.h"
 #include "widgetdatabase_p.h"
@@ -15,6 +16,7 @@
 #include "qdesigner_dockwidget_p.h"
 #include "qdesigner_utils_p.h"
 #include "formwindowbase_p.h"
+#include "objectutils_p.h"
 
 // shared
 #include "layoutinfo_p.h"
@@ -386,26 +388,13 @@ QWidget *WidgetFactory::createWidget(const QString &widgetName, QWidget *parentW
             break;
 
         // 3) table
-        const QByteArray widgetNameBA = widgetName.toUtf8();
-        const char *widgetNameC = widgetNameBA.constData();
-
-        if (w) { // symmetry for macro
+        QWidget *newWidget = createWidgetInstance(widgetName, parentWidget);
+        if (newWidget) {
+            Q_ASSERT(w == nullptr);
+            w = newWidget;
+            break;
         }
 
-#define DECLARE_LAYOUT(L, C)
-#define DECLARE_COMPAT_WIDGET(W, C) /*DECLARE_WIDGET(W, C)*/
-#define DECLARE_WIDGET(W, C) else if (!qstrcmp(widgetNameC, #W)) { Q_ASSERT(w == 0); w = new W(parentWidget); }
-#define DECLARE_WIDGET_1(W, C) else if (!qstrcmp(widgetNameC, #W)) { Q_ASSERT(w == 0); w = new W(0, parentWidget); }
-
-#include <widgets.table>
-
-#undef DECLARE_COMPAT_WIDGET
-#undef DECLARE_LAYOUT
-#undef DECLARE_WIDGET
-#undef DECLARE_WIDGET_1
-
-        if (w)
-            break;
         // 4) fallBack
         const QString fallBackBaseClass = "QWidget"_L1;
         QDesignerWidgetDataBaseInterface *db = core()->widgetDataBase();
@@ -421,7 +410,7 @@ QWidget *WidgetFactory::createWidget(const QString &widgetName, QWidget *parentW
         QString baseClass = item->extends();
         if (baseClass.isEmpty()) {
             // Currently happens in the case of Q3-Support widgets
-            baseClass =fallBackBaseClass;
+            baseClass = fallBackBaseClass;
         }
         if (QWidget *promotedWidget = createWidget(baseClass, parentWidget)) {
             promoteWidget(core(), promotedWidget, widgetName);
@@ -490,7 +479,9 @@ QLayout *WidgetFactory::createUnmanagedLayout(QWidget *parentWidget, int type)
 }
 
 
-/*!  Creates a layout on the widget \a widget of the type \a type
+/*!
+  \internal
+  Creates a layout on the widget \a widget of the type \a type
   which can be \c HBox, \c VBox or \c Grid.
 */
 
@@ -554,7 +545,9 @@ QLayout *WidgetFactory::createLayout(QWidget *widget, QLayout *parentLayout, int
     return layout;
 }
 
-/*!  Returns the widget into which children should be inserted when \a
+/*!
+  \internal
+  Returns the widget into which children should be inserted when \a
   w is a container known to designer.
 
   Usually, it is \a w itself, but there are exceptions (for example, a
@@ -571,7 +564,9 @@ QWidget* WidgetFactory::containerOfWidget(QWidget *w) const
     return w;
 }
 
-/*!  Returns the actual designer widget of the container \a w. This is
+/*!
+  \internal
+  Returns the actual designer widget of the container \a w. This is
   normally \a w itself, but it might be a parent or grand parent of \a w
   (for example, when working with a tabwidget and \a w is the container which
   contains and layouts children, but the actual widget known to

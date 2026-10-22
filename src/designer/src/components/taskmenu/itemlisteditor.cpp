@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #include "itemlisteditor.h"
 #include <abstractformbuilder.h>
@@ -56,7 +57,7 @@ AbstractItemEditor::AbstractItemEditor(QDesignerFormWindowInterface *form, QWidg
 
     connect(m_editorFactory, &DesignerEditorFactory::resetProperty,
             this, &AbstractItemEditor::resetProperty);
-    connect(m_propertyManager, &DesignerPropertyManager::valueChanged,
+    connect(m_propertyManager, &DesignerPropertyManager::valueChanged2,
             this, &AbstractItemEditor::propertyChanged);
     connect(iconCache(), &DesignerIconCache::reloaded, this, &AbstractItemEditor::cacheReloaded);
 }

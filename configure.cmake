@@ -1,30 +1,72 @@
 # Copyright (C) 2022 The Qt Company Ltd.
 # SPDX-License-Identifier: BSD-3-Clause
 
-#### Inputs
-
-
-
-#### Libraries
-
-
+# Include QDoc-specific configuration early (needed for feature definitions)
+include(${CMAKE_CURRENT_LIST_DIR}/src/qdoc/cmake/QDocConfiguration.cmake)
 
 #### Tests
 
-# libclang
-# special case begin
-# Even though Qt builds with qmake and libclang 6.0, it fails with CMake.
-# Presumably because 6.0 ClangConfig.cmake files are not good enough?
-# In any case explicitly request a minimum version of 8.x for now, otherwise
-# building with CMake will fail at compilation time.
 qt_find_package(WrapLibClang 8 PROVIDED_TARGETS WrapLibClang::WrapLibClang)
-# special case end
+qt_find_package_extend_sbom(TARGETS WrapLibClang::WrapLibClang
+    PACKAGE_VERSION "${QT_LIB_CLANG_VERSION}"
+    LICENSE_EXPRESSION "Apache-2.0 WITH LLVM-exception"
+    SUPPLIER "LLVM Foundation"
+    DOWNLOAD_LOCATION "https://github.com/llvm/llvm-project/releases"
+    COPYRIGHTS
+        "Copyright (c) 2003-2019 University of Illinois at Urbana-Champaign."
+        "Copyright (c) 2019-2025 Contributors to the LLVM Project."
+)
 
 if(TARGET WrapLibClang::WrapLibClang)
     set(TEST_libclang "ON" CACHE BOOL "Required libclang version found." FORCE)
 endif()
 
+# We need the LLVM Support library for the objcnamemangler tool. That target can depend on the
+# zstd::libzstd_shared target. The LLVM package creates the Support target regardless of
+# whether the zstd dependency was found, which leads to cmake generation time errors when trying
+# to link to it. Explicitly check if the dependency exists before enabling the tool feature.
+if(MACOS)
+    # Check LLVM_ZSTD_MARKER for reasoning
+    find_package(WrapZSTD QUIET)
+    set(__qt_wrapllvm_CMAKE_DISABLE_FIND_PACKAGE_zstd ${CMAKE_DISABLE_FIND_PACKAGE_zstd})
+    if(WrapZSTD_FOUND)
+        set(CMAKE_DISABLE_FIND_PACKAGE_zstd TRUE)
+    endif()
 
+    qt_find_package(LLVM CONFIG)
+
+    set(CMAKE_DISABLE_FIND_PACKAGE_zstd ${__qt_wrapllvm_CMAKE_DISABLE_FIND_PACKAGE_zstd})
+endif()
+set(llvm_support_lib_available FALSE)
+if(NOT QT_CONFIGURE_RUNNING AND LLVM_FOUND AND COMMAND llvm_map_components_to_libnames)
+    llvm_map_components_to_libnames(support_target Support)
+    if(support_target AND TARGET "${support_target}")
+        get_target_property(llvm_support_interface_link_libs "${support_target}"
+            INTERFACE_LINK_LIBRARIES)
+        if(zstd::libzstd_shared IN_LIST llvm_support_interface_link_libs)
+            if(TARGET zstd::libzstd_shared)
+                set(llvm_support_lib_available TRUE)
+            else()
+                string(CONCAT llvm_support_lib_missing_message
+                    "The objcnamemangler tool will not be built, due to unmet dependencies. The "
+                    "'LLVM Support' library depends on zstd::libzstd_shared, but the target was "
+                    "not found. If you need the tool, ensure that the zstd CMake package is "
+                    "installed and found."
+                )
+                qt_configure_add_report_entry(
+                    TYPE WARNING MESSAGE "${llvm_support_lib_missing_message}"
+                )
+            endif()
+        else()
+            # Not sure if there's a case where the Support library can not have a dependency on
+            # zstd, but if it doesn't, treat the library as available.
+            set(llvm_support_lib_available TRUE)
+        endif()
+    endif()
+    unset(support_target)
+    unset(llvm_support_interface_link_libs)
+    unset(llvm_support_lib_missing_message)
+endif()
 
 #### Features
 
@@ -42,7 +84,7 @@ endif()
 qt_feature("assistant" PRIVATE
     LABEL "Qt Assistant"
     PURPOSE "Qt Assistant is a tool for viewing on-line documentation in Qt help file format."
-    CONDITION TARGET Qt::Widgets AND TARGET Qt::Network AND QT_FEATURE_png AND QT_FEATURE_pushbutton AND QT_FEATURE_toolbutton AND (sqlite_plugin_available OR QT_BUILD_SHARED_LIBS)
+    CONDITION sqlite_plugin_available OR QT_BUILD_SHARED_LIBS
 )
 qt_feature("clang" PRIVATE
     LABEL "libclang found"
@@ -57,9 +99,11 @@ qt_feature("qdoc" PRIVATE
     PURPOSE "QDoc is Qt's documentation generator for C++ and QML projects."
     CONDITION TARGET Qt::QmlPrivate AND QT_FEATURE_clang AND QT_FEATURE_commandlineparser AND QT_FEATURE_thread AND QT_LIB_CLANG_VERSION VERSION_GREATER_EQUAL QDOC_MINIMUM_CLANG_VERSION
 )
-qt_feature("clangcpp" PRIVATE
-    LABEL "Clang-based lupdate parser"
-    CONDITION QT_FEATURE_clang_rtti AND (NOT MSVC OR MSVC_VERSION LESS "1939" OR QT_LIB_CLANG_VERSION_MAJOR GREATER_EQUAL "16")
+qt_feature("qdoc_coverage" PRIVATE
+    LABEL "QDoc Test Coverage"
+    PURPOSE "Enables test coverage collection and reporting for QDoc using gcov/lcov."
+    # User should configure qtbase with "-developer-build -coverage gcov" for coverage instrumentation.
+    CONDITION QT_FEATURE_developer_build AND QT_BUILD_TESTS AND QDOC_COVERAGE_DEPS_FOUND
 )
 qt_feature("designer" PRIVATE
     LABEL "Qt Widgets Designer"
@@ -74,6 +118,7 @@ qt_feature("distancefieldgenerator" PRIVATE
 qt_feature("kmap2qmap" PRIVATE
     LABEL "kmap2qmap"
     PURPOSE "kmap2qmap is a tool to generate keymaps for use on Embedded Linux. The source files have to be in standard Linux kmap format that is e.g. understood by the kernel's loadkeys command."
+    CONDITION TARGET Qt::InputSupportPrivate
 )
 qt_feature("linguist" PRIVATE
     LABEL "Qt Linguist"
@@ -101,105 +146,47 @@ qt_feature("qtattributionsscanner" PRIVATE
 qt_feature("qtdiag" PRIVATE
     LABEL "qtdiag"
     PURPOSE "qtdiag outputs information about the Qt installation it was built with."
-    CONDITION QT_FEATURE_commandlineparser AND TARGET Qt::Gui AND NOT ANDROID AND NOT QNX AND NOT UIKIT AND NOT WASM
+    CONDITION QT_FEATURE_commandlineparser AND TARGET Qt::Gui AND NOT ANDROID AND NOT QNX AND NOT UIKIT AND NOT WASM AND NOT OHOS
 )
 qt_feature("qtplugininfo" PRIVATE
     LABEL "qtplugininfo"
     PURPOSE "qtplugininfo dumps metadata about Qt plugins in JSON format."
-    CONDITION QT_FEATURE_commandlineparser AND QT_FEATURE_library AND (android_app OR NOT ANDROID)
+    CONDITION QT_FEATURE_commandlineparser AND QT_FEATURE_library AND (android_app OR NOT ANDROID) AND NOT OHOS
 )
+qt_feature("fullqthelp" PUBLIC
+    LABEL "fullqthelp"
+    PURPOSE "Builds Help with Gui and Widget dependency."
+    CONDITION (TARGET Qt::Widgets) AND (TARGET Qt::Network) AND QT_FEATURE_png AND
+        QT_FEATURE_pushbutton AND QT_FEATURE_toolbutton
+)
+qt_feature("objcnamemangler" PRIVATE
+    LABEL "Objective-C Name Mangler"
+    CONDITION MACOS AND LLVM_FOUND AND llvm_support_lib_available
+)
+
 qt_configure_add_summary_section(NAME "Qt Tools")
 qt_configure_add_summary_entry(ARGS "assistant")
 qt_configure_add_summary_entry(ARGS "clang")
-qt_configure_add_summary_entry(ARGS "clangcpp")
 qt_configure_add_summary_entry(ARGS "designer")
 qt_configure_add_summary_entry(ARGS "distancefieldgenerator")
-#qt_configure_add_summary_entry(ARGS "kmap2qmap")
+qt_configure_add_summary_entry(ARGS "kmap2qmap")
 qt_configure_add_summary_entry(ARGS "linguist")
 qt_configure_add_summary_entry(ARGS "pixeltool")
 qt_configure_add_summary_entry(ARGS "qdbus")
 qt_configure_add_summary_entry(ARGS "qdoc")
+qt_configure_add_summary_entry(ARGS "qdoc_coverage")
 #qt_configure_add_summary_entry(ARGS "qev")
 qt_configure_add_summary_entry(ARGS "qtattributionsscanner")
 qt_configure_add_summary_entry(ARGS "qtdiag")
 qt_configure_add_summary_entry(ARGS "qtplugininfo")
+qt_configure_add_summary_entry(ARGS "objcnamemangler")
 qt_configure_end_summary_section() # end of "Qt Tools" section
-qt_configure_add_report_entry(
-    TYPE WARNING
-    MESSAGE "
-QDoc will not be compiled, probably because clang's C and C++ libraries could not be located.
-This means that you cannot build the Qt documentation. You may need to set the CMake varibles
-CMAKE_PREFIX_PATH or LLVM_INSTALL_DIR to the location of your llvm installation.
-Other than clang's libraries, you may need to install another package, such as clang itself, to
-provide the ClangConfig.cmake file needed to detect your libraries. Once this file is in place,
-the configure script may be able to detect your system-installed libraries without further
-environment variables.
 
-NOTE: You WILL also need to set the FEATURE_clang CMake variable to ON to re-try finding the
-dependencies.
-
-On macOS, you can use Homebrew's llvm package.
-Run `brew install llvm` and then configure with
-
- `configure LLVM_INSTALL_DIR=/opt/homebrew/opt/llvm FEATURE_clang=ON` for macOS arm64
-or
- `configure LLVM_INSTALL_DIR=/usr/local/opt/llvm FEATURE_clang_ON` for macOS x86_64.
-
-On Linux, you can try installing the clang package from your distribution's package manager.
-On Debian / Ubuntu run `sudo apt install libclang-dev`.
-On Fedora / RHEL run `sudo dnf install clang-devel`.
-On ArchLinux run `sudo pacman -S clang`.
-
-Alternatively, you can use the prebuilt binaries hosted by Qt.
-These let you link LLVM/Clang libraries statically, but only support Release builds on Windows.
-https://download.qt.io/development_releases/prebuilt/libclang/qt/
-
-After installing, reconfigure with
-
- `/qt_src/configure FEATURE_clang=ON` for a top-level build that includes the qttools repo
-or
- `/qt_build/qt-configure-module /path/to/qttools FEATURE_clang=ON` for a per-submodule build
-"
-    CONDITION NOT QT_FEATURE_clang
-)
-qt_configure_add_report_entry(
-    TYPE WARNING
-    MESSAGE "QDoc will not be compiled because the QmlPrivate library wasn't found."
-    CONDITION NOT TARGET Qt::QmlPrivate
-)
-qt_configure_add_report_entry(
-    TYPE WARNING
-    MESSAGE "QDoc cannot be compiled without Qt's commandline parser or thread features."
-    CONDITION NOT QT_FEATURE_commandlineparser OR NOT QT_FEATURE_thread
-)
-qt_configure_add_report_entry(
-    TYPE WARNING
-    MESSAGE "QDoc will not be compiled because it requires libclang ${QDOC_MINIMUM_CLANG_VERSION} or newer."
-    CONDITION QT_LIB_CLANG_VERSION VERSION_LESS QDOC_MINIMUM_CLANG_VERSION
-)
-
-set(clangcpp_warn_msg "")
-if(QT_FEATURE_clang AND NOT QT_FEATURE_clang_rtti)
-    string(APPEND clangcpp_warn_msg
-        "LLVM was found, but it was not built with RTTI support.
-Consider using a different prebuilt LLVM package or building LLVM with RTTI support to
-enable the Clang-based lupdate parser.
-Configuring LLVM with RTTI support can be done by setting the LLVM_ENABLE_RTTI CMake
-variable to ON. See https://llvm.org/docs/CMake.html#building-llvm-with-cmake
-and https://llvm.org/docs/CMake.html#llvm-related-variables for details.
-"
-    )
+# Register QDoc-related configure warnings
+include(${CMAKE_CURRENT_LIST_DIR}/src/qdoc/cmake/QDocConfigureMessages.cmake)
+if(NOT QT_CONFIGURE_RUNNING)
+    qdoc_register_configure_warnings()
 endif()
-string(APPEND clangcpp_warn_msg
-    "The Clang-based lupdate parser will not be available. "
-    "Suitable LLVM and Clang C++ libraries have not been found. "
-    "You will need to set the FEATURE_clangcpp CMake variable to ON to re-evaluate this check."
-)
-qt_configure_add_report_entry(
-    TYPE WARNING
-    MESSAGE "${clangcpp_warn_msg}"
-    CONDITION NOT QT_FEATURE_clangcpp
-)
 
 qt_configure_add_report_entry(
     TYPE WARNING

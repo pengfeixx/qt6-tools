@@ -71,11 +71,13 @@
                         </item>
                         <item>
                             <para>
-                                <link raw="link-test-target" href="qdoctests-qdocfileoutput-linking.html#link-targets" type="page" page="Testing QDoc's link command">Linking using a \target string</link></para>
+                                <link raw="link-test-target" href="qdoctests-qdocfileoutput-linking.html#link-targets" type="page" page="Testing QDoc's link command">Linking using a <teletype>\target</teletype>
+                                </link> string</para>
                         </item>
                         <item>
                             <para>
-                                <link raw="QDoc Linking Test" href="qdoctests-qdocfileoutput-linking.html" type="page" page="Testing QDoc's link command">Linking using a \keyword string</link></para>
+                                <link raw="QDoc Linking Test" href="qdoctests-qdocfileoutput-linking.html" type="page" page="Testing QDoc's link command">Linking using a <teletype>\keyword</teletype>
+                                </link> string</para>
                         </item>
                     </list>
                 </section>
@@ -88,6 +90,8 @@
                     <para>This is allowed but a questionable practice.</para>
                     <para>
                         <bold>Note:</bold> You're looking at detailed information.</para>
+                    <para>Here be more details.</para>
+                    <para>Nothing much to see here.</para>
                 </section>
             </description>
         </page>

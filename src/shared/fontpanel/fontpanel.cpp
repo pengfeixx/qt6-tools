@@ -1,15 +1,17 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "fontpanel_p.h"
 
-#include <QtWidgets/QLabel>
-#include <QtWidgets/QComboBox>
-#include <QtWidgets/QFormLayout>
-#include <QtWidgets/QSpacerItem>
-#include <QtWidgets/QFontComboBox>
-#include <QtCore/QTimer>
-#include <QtWidgets/QLineEdit>
+#include <QtWidgets/qcombobox.h>
+#include <QtWidgets/qfontcombobox.h>
+#include <QtWidgets/qformlayout.h>
+#include <QtWidgets/qlabel.h>
+#include <QtWidgets/qlayoutitem.h>
+#include <QtWidgets/qlineedit.h>
+
+#include <QtCore/qtimer.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -21,12 +23,11 @@ FontPanel::FontPanel(QWidget *parentWidget) :
     m_writingSystemComboBox(new QComboBox),
     m_familyComboBox(new QFontComboBox),
     m_styleComboBox(new QComboBox),
-    m_pointSizeComboBox(new QComboBox),
-    m_previewFontUpdateTimer(0)
+    m_pointSizeComboBox(new QComboBox)
 {
     setTitle(tr("Font"));
 
-    QFormLayout *formLayout = new QFormLayout(this);
+    auto *formLayout = new QFormLayout(this);
     // writing systems
     m_writingSystemComboBox->setEditable(false);
 

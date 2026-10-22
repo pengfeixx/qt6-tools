@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 //
 //  W A R N I N G
@@ -25,8 +26,8 @@ class QtGroupBoxPropertyBrowser : public QtAbstractPropertyBrowser
 {
     Q_OBJECT
 public:
-    QtGroupBoxPropertyBrowser(QWidget *parent = 0);
-    ~QtGroupBoxPropertyBrowser();
+    QtGroupBoxPropertyBrowser(QWidget *parent = nullptr);
+    ~QtGroupBoxPropertyBrowser() override;
 
 protected:
     void itemInserted(QtBrowserItem *item, QtBrowserItem *afterItem) override;

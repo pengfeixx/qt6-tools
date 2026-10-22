@@ -1,9 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <db:article xmlns:db="http://docbook.org/ns/docbook" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:its="http://www.w3.org/2005/11/its" version="5.2" xml:lang="en">
 <db:info>
-<db:title its:translate="no">TestDerived Class</db:title>
-<db:subtitle its:translate="no">TestQDoc::TestDerived</db:subtitle>
-<db:productname>Test</db:productname>
+<db:title its:translate="no">TestQDoc::TestDerived Class</db:title>
+<db:productname>Qt</db:productname>
 <db:titleabbrev>A test project for QDoc build artifacts</db:titleabbrev>
 <db:abstract>
 <db:para>A class in a namespace, derived from <db:link xlink:href="testqdoc-test.xml">Test</db:link>.</db:para>
@@ -14,7 +13,7 @@
 <db:varlistentry>
 <db:term>Header</db:term>
 <db:listitem>
-<db:para>TestDerived</db:para>
+<db:para>testcpp.h</db:para>
 </db:listitem>
 </db:varlistentry>
 <db:varlistentry>
@@ -73,6 +72,61 @@
 <db:synopsisinfo role="threadsafeness">unspecified</db:synopsisinfo>
 </db:typedefsynopsis>
 <db:para>I'm an alias, not a typedef.</db:para>
+</db:section>
+<db:section xml:id="anonymous-enum">
+<db:title its:translate="no">[anonymous] enum</db:title>
+<db:enumsynopsis>
+<db:enumitem>
+<db:enumidentifier>Val1</db:enumidentifier>
+<db:enumvalue>0</db:enumvalue>
+</db:enumitem>
+<db:enumitem>
+<db:enumidentifier>Val2</db:enumidentifier>
+<db:enumvalue>1</db:enumvalue>
+</db:enumitem>
+<db:enumitem>
+<db:enumidentifier>Val3</db:enumidentifier>
+<db:enumvalue>0</db:enumvalue>
+</db:enumitem>
+<db:enumitem>
+<db:enumidentifier>Val4</db:enumidentifier>
+<db:enumvalue>1</db:enumvalue>
+</db:enumitem>
+<db:synopsisinfo role="access">public</db:synopsisinfo>
+<db:synopsisinfo role="status">active</db:synopsisinfo>
+<db:synopsisinfo role="threadsafeness">unspecified</db:synopsisinfo>
+</db:enumsynopsis>
+<db:informaltable>
+<db:thead>
+<db:tr>
+<db:th>Constant</db:th>
+</db:tr>
+</db:thead>
+<db:tr>
+<db:td>
+<db:para its:translate="no"><db:code><db:emphasis role="bold"><db:link xlink:href="testqdoc.xml">TestQDoc</db:link></db:emphasis>::<db:emphasis role="bold"><db:link xlink:href="testqdoc-testderived.xml">TestDerived</db:link></db:emphasis>::Val1</db:code></db:para>
+</db:td>
+<db:td><db:code its:translate="no">0</db:code></db:td>
+</db:tr>
+<db:tr>
+<db:td>
+<db:para its:translate="no"><db:code><db:emphasis role="bold"><db:link xlink:href="testqdoc.xml">TestQDoc</db:link></db:emphasis>::<db:emphasis role="bold"><db:link xlink:href="testqdoc-testderived.xml">TestDerived</db:link></db:emphasis>::Val2</db:code></db:para>
+</db:td>
+<db:td><db:code its:translate="no">1</db:code></db:td>
+</db:tr>
+<db:tr>
+<db:td>
+<db:para its:translate="no"><db:code><db:emphasis role="bold"><db:link xlink:href="testqdoc.xml">TestQDoc</db:link></db:emphasis>::<db:emphasis role="bold"><db:link xlink:href="testqdoc-testderived.xml">TestDerived</db:link></db:emphasis>::Val3</db:code></db:para>
+</db:td>
+<db:td><db:code its:translate="no">0</db:code></db:td>
+</db:tr>
+<db:tr>
+<db:td>
+<db:para its:translate="no"><db:code><db:emphasis role="bold"><db:link xlink:href="testqdoc.xml">TestQDoc</db:link></db:emphasis>::<db:emphasis role="bold"><db:link xlink:href="testqdoc-testderived.xml">TestDerived</db:link></db:emphasis>::Val4</db:code></db:para>
+</db:td>
+<db:td><db:code its:translate="no">1</db:code></db:td>
+</db:tr>
+</db:informaltable>
 </db:section>
 </db:section>
 <db:section xml:id="property-documentation">
@@ -141,6 +195,27 @@
 </db:listitem>
 </db:itemizedlist>
 </db:section>
+<db:section xml:id="duplicate-prop">
+<db:title its:translate="no">[read-only] duplicate : int</db:title>
+<db:fieldsynopsis>
+<db:modifier>(Qt property)</db:modifier>
+<db:type>int</db:type>
+<db:varname>duplicate</db:varname>
+<db:synopsisinfo role="access">public</db:synopsisinfo>
+<db:synopsisinfo role="status">active</db:synopsisinfo>
+<db:synopsisinfo role="threadsafeness">unspecified</db:synopsisinfo>
+<db:synopsisinfo role="getter">duplicate</db:synopsisinfo>
+</db:fieldsynopsis>
+<db:para>
+<db:emphasis role="bold">Access functions:
+</db:emphasis>
+</db:para>
+<db:itemizedlist its:translate="no">
+<db:listitem>
+<db:para><db:type>int</db:type> <db:emphasis role="bold"><db:link xlink:href="">duplicate</db:link></db:emphasis>()</db:para>
+</db:listitem>
+</db:itemizedlist>
+</db:section>
 <db:section xml:id="intProp-prop">
 <db:title its:translate="no">[read-only] intProp : int* const</db:title>
 <db:fieldsynopsis>
@@ -186,7 +261,7 @@
 </db:itemizedlist>
 </db:section>
 <db:section xml:id="secondBoolProp-prop">
-<db:title its:translate="no">[read-only] secondBoolProp : const bool</db:title>
+<db:title its:translate="no">[read-only] secondBoolProp : bool</db:title>
 <db:fieldsynopsis>
 <db:modifier>(Qt property)</db:modifier>
 <db:type>bool</db:type>
@@ -315,7 +390,7 @@
 </db:section>
 </db:section>
 <db:section xml:id="obsolete">
-<db:title>Obsolete Members for TestDerived</db:title>
+<db:title>Obsolete Members for TestQDoc::TestDerived</db:title>
 <db:para><db:emphasis role="bold">The following members of class <db:link xlink:href="testqdoc-testderived.xml">TestDerived</db:link> are deprecated.</db:emphasis> We strongly advise against using them in new code.</db:para>
 <db:section xml:id="obsolete-member-function-documentation">
 <db:title>Obsolete Member Function Documentation</db:title>

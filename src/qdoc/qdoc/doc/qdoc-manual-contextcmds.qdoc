@@ -24,6 +24,9 @@
     \list
       \li \l {abstract-command} {\\abstract}
       \li \l {attribution-command} {\\attribution}
+      \li \l {cmakecomponent-command} {\\cmakecomponent}
+      \li \l {cmakepackage-command} {\\cmakepackage}
+      \li \l {cmaketargetitem-command} {\\cmaketargetitem}
       \li \l {compares-command}{\\compares} (Since QDoc 6.7)
       \li \l {compareswith-command}{\\compareswith} (Since QDoc 6.7)
       \li \l {default-command} {\\default}
@@ -41,7 +44,7 @@
       \li \l {previouspage-command}{\\previouspage}
       \li \l {qmlabstract-command} {\\qmlabstract}
       \li \l {qmldefault-command} {\\qmldefault}
-      \li \qdoccmd qmlenumeratorsfrom (Since QDoc 6.8)
+      \li \l {qmlenumeratorsfrom-command} {\\qmlenumeratorsfrom} (Since QDoc 6.8)
       \li \l {qtcmakepackage-command} {\\qtcmakepackage}
       \li \l {qtcmaketargetitem-command} {\\qtcmaketargetitem}
       \li \l {readonly-command} {\\readonly}
@@ -54,6 +57,8 @@
       \li \l {subtitle-command}{\\subtitle}
       \li \l {threadsafe-command}{\\threadsafe}
       \li \l {title-command}{\\title}
+      \li \l {toc-command}{\\toc} (Since QDoc 6.11)
+      \li \l {tocentry-command}{\\tocentry} (Since QDoc 6.11)
       \li \l {wrapper-command}{\\wrapper}
     \endlist
 
@@ -121,6 +126,56 @@
     documentation. The generated link type tells browsers and search
     engines which document is considered by the author to be the
     starting point of the collection.
+
+    \target toc-command
+    \section2 \\toc
+
+    The \\toc and \\endtoc commands specify a list of sub-topics
+    (pages) for the topic the command appears in. A table of contents
+    (TOC) hierarchy is generated for the entire documentation
+    project based on the TOC entries on each topic.
+
+    Within the \\toc .. \\endtoc block, use \qdoccmd {tocentry} commands
+    to specify the sub-topics by title. Like the \qdoccmd {l} (link)
+    command, \\tocentry takes an optional second argument for the
+    user-visible title in the generated TOC entry.
+
+    \badcode *
+    /\1!
+        \page index.html
+        \title Qt
+        ...
+        \toc
+            \tocentry {Introduction to Qt} {Introduction}
+            \tocentry {What's new in Qt} {What's new}
+            \tocentry {Getting started}
+        \endtoc
+    \1/
+    \endcode
+
+    \\toc commands cannot be nested. However, each sub-topic can specify
+    their own TOC entries. A topic can use only one \\toc command.
+
+    QDoc writes the resulting table of contents structure in XML format
+    to a \e {<project>_toc.xml} file.
+
+    \note The root topic (index or landing page) must be specified in the project
+          configuration with either \c {navigation.landingpage} or \c
+          {navigation.homepage}. See \qdocvar navigation for more information.
+
+    The \\toc command was introduced to QDoc with Qt 6.11.
+
+    See also \qdoccmd {tocentry}.
+
+    \target tocentry-command
+    \section2 \\tocentry
+
+    Specifies a sub-topic (page) as an entry in table of contents. Can only be
+    used inside a pair of \\toc and \\endtoc commands.
+
+    The \\tocentry command was introduced to QDoc with Qt 6.11.
+
+    See also \qdoccmd {toc}.
 */
 
 /*!
@@ -277,7 +332,7 @@
     \l {QtQuick::State::changes}{State} type.
 
     \target qmlenumeratorsfrom-command
-    \section1 \\qmlenenumeratorsfrom
+    \section1 \\qmlenumeratorsfrom
 
     Use the \\qmlenumeratorsfrom command in a \qdoccmd qmlproperty topic
     with a property type \e enumeration, to automatically replicate the
@@ -377,9 +432,8 @@
     \target deprecated-command
     \section1 \\deprecated
 
-    The \\deprecated command is for indicating that a function is being
-    deprecated, and that it should no longer be used in new code. There
-    is no guarantee for how long it will remain in the library.
+    The \\deprecated command is for indicating that the associated element
+    is deprecated, and that it should no longer be used in new code.
 
     The \\deprecated command takes two optional arguments:
     \list
@@ -388,10 +442,9 @@
             replacement.
     \endlist
 
-    When generating the reference documentation for a class, QDoc will
-    create and link to a separate page documenting its deprecated
-    functions. It is good practice to suggest an equivalent function
-    as an alternative.
+    When generating the reference documentation for a class, QDoc
+    creates and links to a separate page that documents deprecated members.
+    It's good practice to suggest an equivalent alternative.
 
     \badcode *
     /\1!
@@ -403,8 +456,8 @@
     \target internal-command
     \section1 \\internal
 
-    The \\internal command indicates that the referenced
-    function is not part of the public interface.
+    The \\internal command indicates that the documented element
+    is not part of the public interface.
 
     The command must stand on its own line.
 
@@ -436,40 +489,44 @@
     \target modulestate-command
     \section1 \\modulestate
 
-    The \\modulestate command can be used within a \\module or \\qmlmodule
-    topic to provide a module state description other than \e preliminary or
-    \e deprecated.
+    Use the \\modulestate command within a \\module or \\qmlmodule
+    topic to provide a custom module state description.
 
-    Rest of the line is taken as an argument that describes the module's
+    The command takes an argument that describes the module's
     state. For example:
 
     \badcode *
     /*!
         \module QtFoo
-        \modulestate Technical Preview
+        \modulestate Experimental
     \1/
     \endcode
 
     QDoc will then add this information on the module page:
 
     \quotation
-    This module is in \e {Technical Preview} state.
+    This module is in \e {Experimental} state.
     \endquotation
+
+    \note Do not use this command to deprecate a module. Use the
+    \l {deprecated-command}{\\deprecated} command instead.
 
     In HTML output, this state information appears also in the navigation
     bar (breadcrumbs) of reference pages for the module's members.
 
+    See also \qdoccmd {preliminary}.
+
     \target preliminary-command
     \section1 \\preliminary
 
-    The \\preliminary command is for indicating that a referenced
-    function is still under development.
+    The \\preliminary command is for indicating that the documented
+    element is still under development.
 
     The command must stand on its own line.
 
-    The \\preliminary command expands to a notification in the
-    function documentation, and marks the function as preliminary when
-    it appears in lists.
+    The \\preliminary command expands to a note in the
+    documentation, and marks the element as preliminary when it appears
+    in lists.
 
     \badcode *
     /\1!
@@ -485,6 +542,12 @@
         return QChar::joiningType(ucs);
     }
     \endcode
+
+    Since QDoc version 6.12, it is possible to customize the status
+    descriptor and the contents of the generated note for elements
+    marked with \\preliminary.
+
+    See also \qdocvar {preliminary} configuration variable.
 
     \target readonly-command
     \section1 \\readonly
@@ -507,15 +570,18 @@
     the associated functionality was added.
 
     If the argument passed to \\since contains no spaces, it is assumed to be
-    a version number string for the Qt project, and QDoc will prefix it with
-    'Qt' in the generated output. The argument can also contain the project
-    name explicitly:
+    shorthand notation for the \l {productname-variable}{productname}, and QDoc
+    will prefix the version with the value of \c productname in the generated
+    output. If the \c productname variable is undefined, QDoc generates only
+    the version string.
+
+    The argument can also contain the product name explicitly:
 
     \badcode
     \since MyFramework 2.0
     \endcode
 
-    In this case, the arguments (project and version) are used as is.
+    In this case, the arguments (product and version) are used as is.
 
     \section2 Inheritance of Since Information
 
@@ -698,11 +764,13 @@
     The \\inherits command is for documenting that one QML type
     inherits some other QML type. It must be included in the
     inheriting element's \l{qmltype-command}{\\qmltype} comment.
-    The argument is the name of the inherited QML type.
+    The argument is the name of the inherited QML type,
+    optionally qualified with a QML module name.
 
     \badcode *
     /\1!
         \qmltype PauseAnimation
+        \inqmlmodule QtQuick
         \nativetype QDeclarativePauseAnimation
         \ingroup qml-animation-transition
         \since 4.7
@@ -732,64 +800,97 @@
         Inherits \l [QML] Animation
     \endquotation
 
+    When documenting a QML types directly in a .qml file, the \\inherits command
+    is normally not required as QDoc can detect the base type from QML syntax.
+    If present, an \\inherits command will override this automatic base type
+    detection.
+
     \target overload-command
     \section2 \\overload
 
-    The \\overload command is for indicating that a function is a
-    secondary overload of its name.
+    Use the \e {\\overload} command to mark C++ function overloads. This command
+    must appear on its own line in the documentation comment.
 
-    The command must stand on its own line.
+    \section3 How it works
 
-    For a function name that is overloaded (except constructors), QDoc
-    expects one primary version of the function, and all the others
-    marked with the \b {\\overload command}. The primary version
-    should be fully documented. Each overload can have whatever extra
-    documentation you want to add for just that overloaded version.
+    When you have multiple C++ functions with the same name (overloads) that
+    perform similar work with different parameters, use \e {\\overload} to avoid
+    repetitive documentation. Functions without \e {\\overload} require complete
+    documentation. Functions with \e {\\overload} can focus on their specific
+    differences.
 
-    You can include the function name plus '()' as a parameter to
-    the \b{\\overload} command, which will include a standard
-    \e{This function overloads...}  line of text with a link
-    to the documentation for the primary version of the function.
+    Functions marked with \e {\\overload} automatically suppress missing
+    parameter warnings, since they reference the documentation of the main
+    function.
+
+    \section3 Basic usage
 
     \badcode *
     /\1!
-        \overload addAction()
-
-        This convenience function creates a new action with an
-        \a icon and some \a text. The function adds the newly
-        created action to the menu's list of actions, and
-        returns it.
-
-        \sa QWidget::addAction()
+        \overload
+        Brief description of what makes this overload different.
     \1/
-    QAction *QMenu::addAction(const QIcon &icon, const QString &text)
-    {
-        QAction *ret = new QAction(icon, text, this);
-        addAction(ret);
-        return ret;
-    }
     \endcode
 
-    If you don't include the function name with the \b{\\overload}
-    command, then instead of the "This function overloads..." line
-    with the link to the documentation for the primary version, you
-    get the old standard line:
+    \section3 Linking to the primary function
 
-    \quotation
-        This is an overloaded member function, provided for
-        convenience.
-    \endquotation.
+    Add the function name to create a link to the primary function:
+
+    \badcode *
+    /\1!
+        \overload functionName()
+        Brief description of what makes this overload different.
+    \1/
+    \endcode
+
+    Use either qualified names (\c{ClassName::functionName()}) or unqualified
+    names (\c{functionName()}). QDoc automatically qualifies unqualified names
+    using the current class or namespace.
+
+    \note For historic reasons, a parameterless unqualified name like
+    \c {functionName()} serves as shorthand for linking to the primary overload,
+    not necessarily the parameterless overload. QDoc uses a search algorithm to
+    find the "best" overload to link to. To link to a specific parameterless
+    function, either designate it as the primary overload with
+    \c {\overload primary}, or use a fully qualified signature that explicitly
+    specifies the empty parameter list.
+
+    \section3 Designating a primary overload
+
+    By default, QDoc chooses the primary overload automatically. To explicitly
+    designate which overload serves as the primary, use:
+
+    \badcode *
+    /\1!
+        \overload primary
+        Main documentation for this function family.
+        Document all parameters here.
+    \1/
+    \endcode
+
+    Primary overloads:
+    \list
+        \li Contain the main function documentation.
+        \li Require complete parameter documentation.
+        \li Do not display "This function overloads..." text.
+        \li Serve as the link target for other overloads.
+    \endlist
+
+    Use \e {\\overload primary} when the most important overload differs from
+    QDoc's automatic selection, or when you need consistent linking behavior.
 
     \target reimp-command
     \section2 \\reimp
 
     The \\reimp command is for indicating that a function is a
-    reimplementation of a virtual function.
+    reimplementation of a virtual function without requiring any
+    additional documentation.
+
+    By default, QDoc will omit a reimplemented virtual function from the
+    class reference unless it is documented. This command ensures that an
+    otherwise undocumented function will be included.
 
     The command must stand on its own line.
-
-    QDoc will omit the reimplemented function from the class
-    reference.
 
     \badcode *
     /\1!
@@ -812,9 +913,13 @@
     \target relates-command
     \section2 \\relates
 
-    The \\relates command is for including the documentation of a
-    global element to some class or header file. The argument is a
-    class name or header file. For template types, use the type name only.
+    The \\relates command is for including the documentation of an
+    entity (a function, macro, typedef, enum, or variable) to a class,
+    namespace, or header file. The argument is the name of the class,
+    namespace, or header the entity is related to.
+
+    If the argument refers to a templated type, use the type name only
+    (without template parameters).
 
     \badcode *
     /\1!
@@ -833,8 +938,16 @@
     }
     \endcode
 
-    The documentation for this function will be included on the reference page
-    for class QChar.
+    The documentation for this function is included on the reference
+    page for class QChar, listed under the \e {Related Non-members} section.
+
+    \note When QDoc resolves unqualified function or type names in
+    documentation, it searches the context of the page where the
+    documentation appears. Because \\relates moves the documentation
+    to a different class's page, autolinks that worked in the
+    original context may no longer resolve. Use fully qualified
+    names or explicit \\l commands for cross-references to members
+    of the original class.
 */
 
 /*!

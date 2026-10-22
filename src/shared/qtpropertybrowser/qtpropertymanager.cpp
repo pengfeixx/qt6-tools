@@ -1,34 +1,31 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "qtpropertymanager_p.h"
 #include "qtpropertybrowserutils_p.h"
 
-#include <QtCore/QDateTime>
-#include <QtCore/QHash>
-#include <QtCore/QLocale>
-#include <QtCore/QMap>
-#include <QtCore/QMetaEnum>
-#include <QtCore/QRegularExpression>
-#include <QtCore/QTimer>
-#include <QtGui/QFontDatabase>
-#include <QtGui/QIcon>
-#include <QtGui/QPainter>
-#include <QtWidgets/QApplication>
-#include <QtWidgets/QLabel>
-#include <QtWidgets/QStyle>
-#include <QtWidgets/QStyleOption>
+#include <QtWidgets/qapplication.h>
+#include <QtWidgets/qlabel.h>
+#include <QtWidgets/qstyle.h>
+#include <QtWidgets/qstyleoption.h>
+
+#include <QtGui/qfontdatabase.h>
+#include <QtGui/qicon.h>
+#include <QtGui/qpainter.h>
+
+#include <QtCore/qdatetime.h>
+#include <QtCore/qhash.h>
+#include <QtCore/qlocale.h>
+#include <QtCore/qmap.h>
+#include <QtCore/qmetaobject.h>
+#include <QtCore/qregularexpression.h>
+#include <QtCore/qtimer.h>
 
 #include <limits>
-#include <limits.h>
-#include <float.h>
 
 #include <algorithm>
 #include <utility>
-
-#if defined(Q_CC_MSVC)
-#    pragma warning(disable: 4786) /* MS VS 6: truncating debug info after 255 characters */
-#endif
 
 QT_BEGIN_NAMESPACE
 
@@ -336,7 +333,7 @@ static void setMinimumValue(PropertyManager *manager, PropertyManagerPrivate *ma
             QtProperty *property, const Value &minVal)
 {
     void (PropertyManagerPrivate::*setSubPropertyRange)(QtProperty *,
-                    ValueChangeParameter, ValueChangeParameter, ValueChangeParameter) = 0;
+                    ValueChangeParameter, ValueChangeParameter, ValueChangeParameter) = nullptr;
     setBorderValue<ValueChangeParameter, PropertyManagerPrivate, PropertyManager, Value, PrivateData>(manager, managerPrivate,
             propertyChangedSignal, valueChangedSignal, rangeChangedSignal,
             property, &PropertyManagerPrivate::Data::minimumValue, &PropertyManagerPrivate::Data::setMinimumValue, minVal, setSubPropertyRange);
@@ -350,7 +347,7 @@ static void setMaximumValue(PropertyManager *manager, PropertyManagerPrivate *ma
             QtProperty *property, const Value &maxVal)
 {
     void (PropertyManagerPrivate::*setSubPropertyRange)(QtProperty *,
-                    ValueChangeParameter, ValueChangeParameter, ValueChangeParameter) = 0;
+                    ValueChangeParameter, ValueChangeParameter, ValueChangeParameter) = nullptr;
     setBorderValue<ValueChangeParameter, PropertyManagerPrivate, PropertyManager, Value, PrivateData>(manager, managerPrivate,
             propertyChangedSignal, valueChangedSignal, rangeChangedSignal,
             property, &PropertyManagerPrivate::Data::maximumValue, &PropertyManagerPrivate::Data::setMaximumValue, maxVal, setSubPropertyRange);
@@ -425,7 +422,7 @@ void QtMetaEnumProvider::initLocale()
 
         if (!locales.isEmpty() && !m_languageToIndex.contains(language)) {
             const auto territories = sortedTerritories(locales);
-            int langIdx = m_languageEnumNames.size();
+            qsizetype langIdx = m_languageEnumNames.size();
             m_indexToLanguage[langIdx] = language;
             m_languageToIndex[language] = langIdx;
             QStringList territoryNames;
@@ -474,10 +471,15 @@ void QtMetaEnumProvider::indexToLocale(int languageIndex, int territoryIndex, QL
 {
     QLocale::Language l = QLocale::C;
     QLocale::Territory c = QLocale::AnyTerritory;
-    if (m_indexToLanguage.contains(languageIndex)) {
-        l = m_indexToLanguage[languageIndex];
-        if (m_indexToTerritory.contains(languageIndex) && m_indexToTerritory[languageIndex].contains(territoryIndex))
-            c = m_indexToTerritory[languageIndex][territoryIndex];
+    const auto lit = m_indexToLanguage.constFind(languageIndex);
+    if (lit != m_indexToLanguage.cend()) {
+        l = lit.value();
+        const auto tit = m_indexToTerritory.constFind(languageIndex);
+        if (tit != m_indexToTerritory.end()) {
+            const auto tit2 = tit.value().constFind(territoryIndex);
+            if (tit2 != tit.value().cend())
+                c = tit2.value();
+        }
     }
     if (language)
         *language = l;
@@ -489,10 +491,15 @@ void QtMetaEnumProvider::localeToIndex(QLocale::Language language, QLocale::Terr
 {
     int l = -1;
     int c = -1;
-    if (m_languageToIndex.contains(language)) {
-        l = m_languageToIndex[language];
-        if (m_territoryToIndex.contains(language) && m_territoryToIndex[language].contains(territory))
-            c = m_territoryToIndex[language][territory];
+    const auto lit = m_languageToIndex.constFind(language);
+    if (lit != m_languageToIndex.cend()) {
+        l = lit.value();
+        const auto tit = m_territoryToIndex.constFind(language);
+        if (tit != m_territoryToIndex.cend()) {
+            const auto tit2 = tit.value().constFind(territory);
+            if (tit2 != tit.value().cend())
+                c = tit2.value();
+        }
     }
 
     if (languageIndex)
@@ -530,10 +537,7 @@ QtGroupPropertyManager::QtGroupPropertyManager(QObject *parent)
 /*!
     Destroys this manager, and all the properties it has created.
 */
-QtGroupPropertyManager::~QtGroupPropertyManager()
-{
-
-}
+QtGroupPropertyManager::~QtGroupPropertyManager() = default;
 
 /*!
     \reimp
@@ -571,8 +575,8 @@ public:
     struct Data
     {
         int val{0};
-        int minVal{-INT_MAX};
-        int maxVal{INT_MAX};
+        int minVal{std::numeric_limits<int>::min()};
+        int maxVal{std::numeric_limits<int>::max()};
         int singleStep{1};
         int minimumValue() const { return minVal; }
         int maximumValue() const { return maxVal; }
@@ -846,8 +850,8 @@ public:
     struct Data
     {
         double val{0};
-        double minVal{-DBL_MAX};
-        double maxVal{DBL_MAX};
+        double minVal{std::numeric_limits<double>::lowest()};
+        double maxVal{std::numeric_limits<double>::max()};
         double singleStep{1};
         int decimals{2};
         double minimumValue() const { return minVal; }
@@ -1353,34 +1357,45 @@ void QtStringPropertyManager::uninitializeProperty(QtProperty *property)
 
 // QtBoolPropertyManager
 //     Return an icon containing a check box indicator
-static QIcon drawCheckBox(bool value)
+class QCheckBoxIconEngine : public QtPropertyIconEngine
 {
-    QStyleOptionButton opt;
-    opt.state |= value ? QStyle::State_On : QStyle::State_Off;
-    opt.state |= QStyle::State_Enabled;
-    const QStyle *style = QApplication::style();
-    // Figure out size of an indicator and make sure it is not scaled down in a list view item
-    // by making the pixmap as big as a list view icon and centering the indicator in it.
-    // (if it is smaller, it can't be helped)
-    const int indicatorWidth = style->pixelMetric(QStyle::PM_IndicatorWidth, &opt);
-    const int indicatorHeight = style->pixelMetric(QStyle::PM_IndicatorHeight, &opt);
-    const int listViewIconSize = indicatorWidth;
-    const int pixmapWidth = indicatorWidth;
-    const int pixmapHeight = qMax(indicatorHeight, listViewIconSize);
+public:
+    Q_DISABLE_COPY_MOVE(QCheckBoxIconEngine)
 
-    opt.rect = QRect(0, 0, indicatorWidth, indicatorHeight);
-    QPixmap pixmap = QPixmap(pixmapWidth, pixmapHeight);
-    pixmap.fill(Qt::transparent);
+    explicit QCheckBoxIconEngine(bool checked) : m_checked(checked) { }
+
+    QIconEngine *clone() const override { return new QCheckBoxIconEngine(m_checked); }
+
+    void paint(QPainter *painter, const QRect &rect, QIcon::Mode, QIcon::State) override
     {
-        // Center?
-        const int xoff = (pixmapWidth  > indicatorWidth)  ? (pixmapWidth  - indicatorWidth)  / 2 : 0;
-        const int yoff = (pixmapHeight > indicatorHeight) ? (pixmapHeight - indicatorHeight) / 2 : 0;
-        QPainter painter(&pixmap);
-        painter.translate(xoff, yoff);
-        style->drawPrimitive(QStyle::PE_IndicatorCheckBox, &opt, &painter);
+        QStyleOptionButton opt;
+        opt.state.setFlag(m_checked ? QStyle::State_On : QStyle::State_Off);
+        opt.state.setFlag(QStyle::State_Enabled);
+
+        // Figure out size of an indicator and make sure it is not scaled down in a list view item
+        // by making the pixmap as big as a list view icon and centering the indicator in it.
+        // (if it is smaller, it can't be helped)
+        const QStyle *style = QApplication::style();
+        const int indicatorWidth = style->pixelMetric(QStyle::PM_IndicatorWidth, &opt);
+        const int indicatorHeight = style->pixelMetric(QStyle::PM_IndicatorHeight, &opt);
+        opt.rect = rect;
+        if (opt.rect.width() > indicatorWidth) {
+            const int xOff = opt.rect.width() - indicatorWidth;
+            opt.rect.setX(opt.rect.x() + xOff / 2);
+            opt.rect.setWidth(indicatorWidth);
+        }
+        if (opt.rect.height() > indicatorHeight) {
+            const int yOff = opt.rect.height() - indicatorHeight;
+            opt.rect.setY(opt.rect.y() + yOff / 2);
+            opt.rect.setHeight(indicatorHeight);
+        }
+
+        style->drawPrimitive(QStyle::PE_IndicatorCheckBox, &opt, painter);
     }
-    return QIcon(pixmap);
-}
+
+private:
+    bool m_checked;
+};
 
 class QtBoolPropertyManagerPrivate
 {
@@ -1395,8 +1410,8 @@ public:
 };
 
 QtBoolPropertyManagerPrivate::QtBoolPropertyManagerPrivate() :
-    m_checkedIcon(drawCheckBox(true)),
-    m_uncheckedIcon(drawCheckBox(false))
+    m_checkedIcon(new QCheckBoxIconEngine(true)),
+    m_uncheckedIcon(new QCheckBoxIconEngine(false))
 {
 }
 
@@ -2226,7 +2241,7 @@ void QtLocalePropertyManagerPrivate::slotEnumChanged(QtProperty *property, int v
         const QLocale loc = m_values[prop];
         QLocale::Language newLanguage = loc.language();
         QLocale::Territory newTerritory = loc.territory();
-        metaEnumProvider()->indexToLocale(value, 0, &newLanguage, 0);
+        metaEnumProvider()->indexToLocale(value, 0, &newLanguage, nullptr);
         QLocale newLoc(newLanguage, newTerritory);
         q_ptr->setValue(prop, newLoc);
     } else if (QtProperty *prop = m_territoryToProperty.value(property, nullptr)) {
@@ -2344,7 +2359,7 @@ QString QtLocalePropertyManager::valueText(const QtProperty *property) const
     if (it == d_ptr->m_values.constEnd())
         return {};
 
-    const QLocale loc = it.value();
+    const QLocale &loc = it.value();
 
     int langIdx = 0;
     int territoryIdx = 0;
@@ -2354,7 +2369,7 @@ QString QtLocalePropertyManager::valueText(const QtProperty *property) const
         qWarning("QtLocalePropertyManager::valueText: Unknown language %d", loc.language());
         return tr("<Invalid>");
     }
-    const QString languageName = me->languageEnumNames().at(langIdx);
+    QString languageName = me->languageEnumNames().at(langIdx); // enable move
     if (territoryIdx < 0) {
         qWarning("QtLocalePropertyManager::valueText: Unknown territory %d for %s", loc.territory(), qPrintable(languageName));
         return languageName;
@@ -2377,7 +2392,7 @@ void QtLocalePropertyManager::setValue(QtProperty *property, const QLocale &val)
     if (it == d_ptr->m_values.end())
         return;
 
-    const QLocale loc = it.value();
+    const QLocale &loc = it.value();
     if (loc == val)
         return;
 
@@ -2952,7 +2967,7 @@ public:
     {
         QSize val{0, 0};
         QSize minVal{0, 0};
-        QSize maxVal{INT_MAX, INT_MAX};
+        QSize maxVal{std::numeric_limits<int>::max(), std::numeric_limits<int>::max()};
         QSize minimumValue() const { return minVal; }
         QSize maximumValue() const { return maxVal; }
         void setMinimumValue(QSize newMinVal) { setSizeMinimumData(this, newMinVal); }
@@ -3758,12 +3773,14 @@ void QtRectPropertyManagerPrivate::setConstraint(QtProperty *property,
                                                  QRect constraint, QRect val)
 {
     const bool isNull = constraint.isNull();
-    const int left   = isNull ? INT_MIN : constraint.left();
-    const int right  = isNull ? INT_MAX : constraint.left() + constraint.width();
-    const int top    = isNull ? INT_MIN : constraint.top();
-    const int bottom = isNull ? INT_MAX : constraint.top() + constraint.height();
-    const int width  = isNull ? INT_MAX : constraint.width();
-    const int height = isNull ? INT_MAX : constraint.height();
+    const int left   = isNull ? std::numeric_limits<int>::min() : constraint.left();
+    const int right  = isNull
+            ? std::numeric_limits<int>::max() : constraint.left() + constraint.width();
+    const int top    = isNull ? std::numeric_limits<int>::min() : constraint.top();
+    const int bottom = isNull
+            ? std::numeric_limits<int>::max() : constraint.top() + constraint.height();
+    const int width  = isNull ? std::numeric_limits<int>::max() : constraint.width();
+    const int height = isNull ? std::numeric_limits<int>::max() : constraint.height();
 
     m_intPropertyManager->setRange(m_propertyToX[property], left, right);
     m_intPropertyManager->setRange(m_propertyToY[property], top, bottom);
@@ -4164,12 +4181,14 @@ void QtRectFPropertyManagerPrivate::setConstraint(QtProperty *property,
             const QRectF &constraint, const QRectF &val)
 {
     const bool isNull = constraint.isNull();
-    const float left   = isNull ? FLT_MIN : constraint.left();
-    const float right  = isNull ? FLT_MAX : constraint.left() + constraint.width();
-    const float top    = isNull ? FLT_MIN : constraint.top();
-    const float bottom = isNull ? FLT_MAX : constraint.top() + constraint.height();
-    const float width  = isNull ? FLT_MAX : constraint.width();
-    const float height = isNull ? FLT_MAX : constraint.height();
+    const float left   = isNull ? std::numeric_limits<float>::lowest() : constraint.left();
+    const float right  = isNull
+            ? std::numeric_limits<float>::max() : constraint.left() + constraint.width();
+    const float top    = isNull ? std::numeric_limits<float>::lowest() : constraint.top();
+    const float bottom = isNull
+            ? std::numeric_limits<float>::max() : constraint.top() + constraint.height();
+    const float width  = isNull ? std::numeric_limits<float>::max() : constraint.width();
+    const float height = isNull ? std::numeric_limits<float>::max() : constraint.height();
 
     m_doublePropertyManager->setRange(m_propertyToX[property], left, right);
     m_doublePropertyManager->setRange(m_propertyToY[property], top, bottom);
@@ -4727,7 +4746,7 @@ void QtEnumPropertyManager::setValue(QtProperty *property, int val)
     if (val >= data.enumNames.size())
         return;
 
-    if (val < 0 && data.enumNames.size() > 0)
+    if (val < 0 && !data.enumNames.empty())
         return;
 
     if (val < 0)
@@ -4769,7 +4788,7 @@ void QtEnumPropertyManager::setEnumNames(QtProperty *property, const QStringList
 
     data.val = -1;
 
-    if (enumNames.size() > 0)
+    if (!enumNames.empty())
         data.val = 0;
 
     it.value() = data;
@@ -4874,7 +4893,7 @@ void QtFlagPropertyManagerPrivate::slotPropertyDestroyed(QtProperty *property)
     if (flagProperty == nullptr)
         return;
 
-    m_propertyToFlags[flagProperty].replace(m_propertyToFlags[flagProperty].indexOf(property), 0);
+    m_propertyToFlags[flagProperty].replace(m_propertyToFlags[flagProperty].indexOf(property), nullptr);
     m_flagToProperty.remove(property);
 }
 
@@ -5152,16 +5171,14 @@ class QtSizePolicyPropertyManagerPrivate
     Q_DECLARE_PUBLIC(QtSizePolicyPropertyManager)
 public:
 
-    QtSizePolicyPropertyManagerPrivate();
-
     void slotIntChanged(QtProperty *property, int value);
     void slotEnumChanged(QtProperty *property, int value);
     void slotPropertyDestroyed(QtProperty *property);
 
     QHash<const QtProperty *, QSizePolicy> m_values;
 
-    QtIntPropertyManager *m_intPropertyManager;
-    QtEnumPropertyManager *m_enumPropertyManager;
+    QtIntPropertyManager *m_intPropertyManager = nullptr;
+    QtEnumPropertyManager *m_enumPropertyManager = nullptr;
 
     QHash<const QtProperty *, QtProperty *> m_propertyToHPolicy;
     QHash<const QtProperty *, QtProperty *> m_propertyToVPolicy;
@@ -5173,10 +5190,6 @@ public:
     QHash<const QtProperty *, QtProperty *> m_hStretchToProperty;
     QHash<const QtProperty *, QtProperty *> m_vStretchToProperty;
 };
-
-QtSizePolicyPropertyManagerPrivate::QtSizePolicyPropertyManagerPrivate()
-{
-}
 
 void QtSizePolicyPropertyManagerPrivate::slotIntChanged(QtProperty *property, int value)
 {
@@ -5475,8 +5488,6 @@ class QtFontPropertyManagerPrivate
     Q_DECLARE_PUBLIC(QtFontPropertyManager)
 public:
 
-    QtFontPropertyManagerPrivate();
-
     void slotIntChanged(QtProperty *property, int value);
     void slotEnumChanged(QtProperty *property, int value);
     void slotBoolChanged(QtProperty *property, bool value);
@@ -5510,15 +5521,9 @@ public:
     QHash<const QtProperty *, QtProperty *> m_kerningToProperty;
     QHash<const QtProperty *, QtProperty *> m_weightToProperty;
 
-    bool m_settingValue;
-    QTimer *m_fontDatabaseChangeTimer;
+    bool m_settingValue = false;
+    QTimer *m_fontDatabaseChangeTimer = nullptr;
 };
-
-QtFontPropertyManagerPrivate::QtFontPropertyManagerPrivate() :
-    m_settingValue(false),
-    m_fontDatabaseChangeTimer(0)
-{
-}
 
 void QtFontPropertyManagerPrivate::slotIntChanged(QtProperty *property, int value)
 {
@@ -5625,7 +5630,7 @@ void QtFontPropertyManagerPrivate::slotFontDatabaseDelayedChange()
     if (!m_propertyToFamily.isEmpty()) {
         for (QtProperty *familyProp : std::as_const(m_propertyToFamily)) {
             const int oldIdx = m_enumPropertyManager->value(familyProp);
-            int newIdx = m_familyNames.indexOf(oldFamilies.at(oldIdx));
+            qsizetype newIdx = m_familyNames.indexOf(oldFamilies.at(oldIdx));
             if (newIdx < 0)
                 newIdx = 0;
             m_enumPropertyManager->setEnumNames(familyProp, m_familyNames);
@@ -5803,13 +5808,13 @@ void QtFontPropertyManager::setValue(QtProperty *property, const QFont &val)
     if (it == d_ptr->m_values.end())
         return;
 
-    const QFont oldVal = it.value();
+    const QFont &oldVal = it.value();
     if (oldVal == val && oldVal.resolveMask() == val.resolveMask())
         return;
 
     it.value() = val;
 
-    int idx = d_ptr->m_familyNames.indexOf(val.family());
+    qsizetype idx = d_ptr->m_familyNames.indexOf(val.family());
     if (idx == -1)
         idx = 0;
     bool settingValue = d_ptr->m_settingValue;
@@ -5862,7 +5867,7 @@ void QtFontPropertyManager::initializeProperty(QtProperty *property)
     if (d_ptr->m_familyNames.isEmpty())
         d_ptr->m_familyNames = QFontDatabase::families();
     d_ptr->m_enumPropertyManager->setEnumNames(familyProp, d_ptr->m_familyNames);
-    int idx = d_ptr->m_familyNames.indexOf(val.family());
+    qsizetype idx = d_ptr->m_familyNames.indexOf(val.family());
     if (idx == -1)
         idx = 0;
     d_ptr->m_enumPropertyManager->setValue(familyProp, idx);

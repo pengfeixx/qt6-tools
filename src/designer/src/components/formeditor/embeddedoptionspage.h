@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #ifndef EMBEDDEDOPTIONSPAGE_H
 #define EMBEDDEDOPTIONSPAGE_H
@@ -23,7 +24,7 @@ class EmbeddedOptionsControl : public QWidget {
     Q_OBJECT
 public:
     explicit EmbeddedOptionsControl(QDesignerFormEditorInterface *core, QWidget *parent = nullptr);
-    ~EmbeddedOptionsControl();
+    ~EmbeddedOptionsControl() override;
 
     bool isDirty() const;
 

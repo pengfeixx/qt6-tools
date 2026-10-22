@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "qhelpsearchresultwidget.h"
 
@@ -175,7 +176,7 @@ QHelpSearchResultWidget::QHelpSearchResultWidget(QHelpSearchEngine *engine)
     vLayout->setSpacing(0);
 
     QHBoxLayout *hBoxLayout = new QHBoxLayout();
-#ifndef Q_OS_MAC
+#ifndef Q_OS_MACOS
     hBoxLayout->setContentsMargins({});
     hBoxLayout->setSpacing(0);
 #endif
@@ -259,7 +260,7 @@ QHelpSearchResultWidget::~QHelpSearchResultWidget()
 QUrl QHelpSearchResultWidget::linkAt(const QPoint &point)
 {
     if (d->resultTextBrowser)
-        return d->resultTextBrowser->anchorAt(point);
+        return QUrl(d->resultTextBrowser->anchorAt(point));
     return {};
 }
 

@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 //
 //  W A R N I N G
@@ -18,7 +19,8 @@
 #include "shared_global_p.h"
 #include <QtCore/qmap.h>
 #include <QtCore/qobject.h>
-#include <QtCore/qscopedpointer.h>
+
+#include <memory>
 
 QT_BEGIN_NAMESPACE
 
@@ -50,7 +52,7 @@ private:
     ~QtResourceSet();
     friend class QtResourceModel;
 
-    QScopedPointer<class QtResourceSetPrivate> d_ptr;
+    std::unique_ptr<class QtResourceSetPrivate> d_ptr;
     Q_DECLARE_PRIVATE(QtResourceSet)
     Q_DISABLE_COPY_MOVE(QtResourceSet)
 };
@@ -60,7 +62,7 @@ class QDESIGNER_SHARED_EXPORT QtResourceModel : public QObject // one instance p
     Q_OBJECT
 public:
     QtResourceModel(QObject *parent = nullptr);
-    ~QtResourceModel();
+    ~QtResourceModel() override;
 
     QStringList loadedQrcFiles() const;
     bool isModified(const QString &path) const; // only for paths which are on loadedQrcFiles() list
@@ -95,7 +97,7 @@ signals:
 private:
     friend class QtResourceSet;
 
-    QScopedPointer<class QtResourceModelPrivate> d_ptr;
+    std::unique_ptr<class QtResourceModelPrivate> d_ptr;
     Q_DECLARE_PRIVATE(QtResourceModel)
     Q_DISABLE_COPY_MOVE(QtResourceModel)
 };

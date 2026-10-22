@@ -10,8 +10,9 @@ qt_internal_add_app(designer
     SOURCES
         ../../../shared/fontpanel/fontpanel.cpp ../../../shared/fontpanel/fontpanel_p.h
         ../../../shared/qttoolbardialog/qttoolbardialog.cpp ../../../shared/qttoolbardialog/qttoolbardialog_p.h ../../../shared/qttoolbardialog/qttoolbardialog.ui
+        ../../../shared/helpclient/assistantclient.cpp ../../../shared/helpclient/assistantclient.h
+        ../../../shared/helpclient/helpclient.cpp ../../../shared/helpclient/helpclient.h
         appfontdialog.cpp appfontdialog.h
-        assistantclient.cpp assistantclient.h
         designer_enums.h
         main.cpp
         mainwindow.cpp mainwindow.h
@@ -29,6 +30,7 @@ qt_internal_add_app(designer
         versiondialog.cpp versiondialog.h
     INCLUDE_DIRECTORIES
         ../../../shared/fontpanel
+        ../../../shared/helpclient
         ../../../shared/qttoolbardialog
         ../lib/extension
         ../lib/sdk
@@ -115,6 +117,23 @@ if(UNIX)
     )
 endif()
 
+if(QT_INSTALL_XDG_DESKTOP_ENTRIES)
+    if(UNIX AND NOT APPLE)
+        qt_path_join(xdg_install_dir ${QT_INSTALL_DIR} ${CMAKE_INSTALL_DATAROOTDIR})
+
+        qt_install(FILES designer.desktop
+            DESTINATION "${xdg_install_dir}/applications"
+        )
+        qt_install(FILES designer.metainfo.xml
+            RENAME io.qt.Designer.metainfo.xml
+            DESTINATION "${xdg_install_dir}/metainfo"
+        )
+        qt_install(FILES images/designer.png
+            DESTINATION "${xdg_install_dir}/icons/hicolor/128x128/apps"
+        )
+    endif()
+endif()
+
 if(APPLE)
     set_target_properties(designer PROPERTIES
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info_mac.plist"
@@ -136,6 +155,13 @@ if(APPLE)
     set_source_files_properties(uifile.icns PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
     target_sources(designer PRIVATE uifile.icns)
     # special case end
+
+    # Bundle the entitlements file in the installed bundle Resources subdirectory, so that the
+    # post-CI signing process uses it to ensure 3rd party widget plugins can also be loaded.
+    target_sources(designer PRIVATE Designer.entitlements)
+    set_source_files_properties(Designer.entitlements PROPERTIES
+        MACOSX_PACKAGE_LOCATION Resources
+    )
 endif()
 
 # FILETYPES.files = "uifile.icns"

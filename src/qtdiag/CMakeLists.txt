@@ -12,8 +12,6 @@ qt_internal_add_app(qtdiag
         qtdiag.cpp qtdiag.h
     LIBRARIES
         Qt::CorePrivate
-        # Qt::Gui # special case QTBUG-83498
-        # Qt::GuiPrivate # special case QTBUG-83498
 )
 set_target_properties(qtdiag PROPERTIES
     WIN32_EXECUTABLE FALSE

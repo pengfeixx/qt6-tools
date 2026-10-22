@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #include "layout_propertysheet.h"
 
@@ -25,8 +26,6 @@ QT_BEGIN_NAMESPACE
 
 using namespace Qt::StringLiterals;
 
-#define USE_LAYOUT_SIZE_CONSTRAINT
-
 static constexpr auto leftMargin = "leftMargin"_L1;
 static constexpr auto topMargin = "topMargin"_L1;
 static constexpr auto rightMargin = "rightMargin"_L1;
@@ -34,7 +33,12 @@ static constexpr auto bottomMargin = "bottomMargin"_L1;
 static constexpr auto horizontalSpacing = "horizontalSpacing"_L1;
 static constexpr auto verticalSpacing = "verticalSpacing"_L1;
 static constexpr auto spacing = "spacing"_L1;
+#if QT_VERSION < QT_VERSION_CHECK(7, 0, 0)
 static constexpr auto sizeConstraint = "sizeConstraint"_L1;
+#else
+static constexpr auto horizontalSizeConstraint = "horizontalSizeConstraint"_L1;
+static constexpr auto verticalSizeConstraint = "verticalSizeConstraint"_L1;
+#endif
 static constexpr auto boxStretchPropertyC = "stretch"_L1;
 static constexpr auto gridRowStretchPropertyC = "rowStretch"_L1;
 static constexpr auto gridColumnStretchPropertyC = "columnStretch"_L1;
@@ -51,7 +55,12 @@ namespace {
         LayoutPropertySpacing,
         LayoutPropertyHorizontalSpacing,
         LayoutPropertyVerticalSpacing,
+#if QT_VERSION < QT_VERSION_CHECK(7, 0, 0)
         LayoutPropertySizeConstraint,
+#else
+        LayoutPropertyHorizontalSizeConstraint,
+        LayoutPropertyVerticalSizeConstraint,
+#endif
         LayoutPropertyBoxStretch,
         LayoutPropertyGridRowStretch,
         LayoutPropertyGridColumnStretch,
@@ -85,7 +94,12 @@ static LayoutPropertyType  layoutPropertyType(const QString &name)
         {horizontalSpacing, LayoutPropertyHorizontalSpacing},
         {verticalSpacing, LayoutPropertyVerticalSpacing},
         {spacing, LayoutPropertySpacing},
+#if QT_VERSION < QT_VERSION_CHECK(7, 0, 0)
         {sizeConstraint, LayoutPropertySizeConstraint},
+#else
+        {horizontalSizeConstraint, LayoutPropertyHorizontalSizeConstraint},
+        {verticalSizeConstraint, LayoutPropertyVerticalSizeConstraint},
+#endif
         {boxStretchPropertyC, LayoutPropertyBoxStretch},
         {gridRowStretchPropertyC, LayoutPropertyGridRowStretch},
         {gridColumnStretchPropertyC, LayoutPropertyGridColumnStretch},
@@ -199,12 +213,17 @@ LayoutPropertySheet::LayoutPropertySheet(QLayout *l, QObject *parent)
             setAttribute(pindex, true);
         }
     }
-#ifdef USE_LAYOUT_SIZE_CONSTRAINT
     // SizeConstraint cannot possibly be handled as a real property
     // as it affects the layout parent widget and thus
     // conflicts with Designer's special layout widget.
     // It will take effect on the preview only.
+#if QT_VERSION < QT_VERSION_CHECK(7, 0, 0)
     pindex = createFakeProperty(sizeConstraint);
+    setPropertyGroup(pindex, layoutGroup);
+#else
+    pindex = createFakeProperty(horizontalSizeConstraint);
+    setPropertyGroup(pindex, layoutGroup);
+    pindex = createFakeProperty(verticalSizeConstraint);
     setPropertyGroup(pindex, layoutGroup);
 #endif
 }

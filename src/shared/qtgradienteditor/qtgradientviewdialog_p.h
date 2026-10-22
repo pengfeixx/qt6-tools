@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 //
 //  W A R N I N G
@@ -15,8 +16,8 @@
 #ifndef GRADIENTVIEWDIALOG_H
 #define GRADIENTVIEWDIALOG_H
 
-#include <QtWidgets/QWidget>
-#include <QtCore/QMap>
+#include <QtWidgets/qwidget.h>
+#include <QtCore/qmap.h>
 #include "ui_qtgradientviewdialog.h"
 
 QT_BEGIN_NAMESPACE
@@ -27,12 +28,12 @@ class QtGradientViewDialog : public QDialog
 {
     Q_OBJECT
 public:
-    QtGradientViewDialog(QWidget *parent = 0);
+    explicit QtGradientViewDialog(QWidget *parent = nullptr);
 
     void setGradientManager(QtGradientManager *manager);
     QtGradientManager *gradientManager() const;
 
-    static QGradient getGradient(bool *ok, QtGradientManager *manager, QWidget *parent = 0, const QString &caption = tr("Select Gradient", 0));
+    static QGradient getGradient(bool *ok, QtGradientManager *manager, QWidget *parent = nullptr, const QString &caption = tr("Select Gradient", nullptr));
 
 private slots:
     void slotGradientSelected(const QString &id);

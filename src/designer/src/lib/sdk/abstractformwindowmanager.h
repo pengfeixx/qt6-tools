@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #ifndef ABSTRACTFORMWINDOWMANAGER_H
 #define ABSTRACTFORMWINDOWMANAGER_H
@@ -8,7 +9,6 @@
 #include <QtDesigner/abstractformwindow.h>
 
 #include <QtCore/qobject.h>
-#include <QtCore/qscopedpointer.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -25,7 +25,7 @@ class QDESIGNER_SDK_EXPORT QDesignerFormWindowManagerInterface: public QObject
     Q_OBJECT
 public:
     explicit QDesignerFormWindowManagerInterface(QObject *parent = nullptr);
-    virtual ~QDesignerFormWindowManagerInterface();
+    ~QDesignerFormWindowManagerInterface() override;
 
     enum Action
     {

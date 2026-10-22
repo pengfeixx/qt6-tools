@@ -1,16 +1,27 @@
 // Copyright (C) 2020 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #ifndef FORMBUILDER_H
 #define FORMBUILDER_H
 
 #if 0
 #  pragma qt_class(QFormBuilder)
-#  pragma qt_sync_skip_header_check
 #endif
 
-#include "uilib_global.h"
-#include "abstractformbuilder.h"
+#if defined(QT_BUILD_UITOOLS_LIB)
+#  if 0
+#    pragma qt_sync_suspend_processing
+#  endif
+#  include "uilib_global.h"
+#  include "abstractformbuilder.h"
+#  if 0
+#    pragma qt_sync_resume_processing
+#  endif
+#else
+#  include <QtDesigner/uilib_global.h>
+#  include <QtDesigner/abstractformbuilder.h>
+#endif
 
 QT_BEGIN_NAMESPACE
 

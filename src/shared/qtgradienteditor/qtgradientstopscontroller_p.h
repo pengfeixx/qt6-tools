@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 //
 //  W A R N I N G
@@ -15,7 +16,7 @@
 #ifndef QTGRADIENTSTOPSCONTROLLER_H
 #define QTGRADIENTSTOPSCONTROLLER_H
 
-#include <QtWidgets/QWidget>
+#include <QtWidgets/qwidget.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -27,8 +28,8 @@ class QtGradientStopsController : public QObject
 {
     Q_OBJECT
 public:
-    QtGradientStopsController(QObject *parent = 0);
-    ~QtGradientStopsController();
+    explicit QtGradientStopsController(QObject *parent = nullptr);
+    ~QtGradientStopsController() override;
 
     void setUi(Ui::QtGradientEditor *editor);
 

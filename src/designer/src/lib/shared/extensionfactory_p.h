@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 //
 //  W A R N I N G
@@ -72,7 +73,7 @@ QObject *ExtensionFactory<ExtensionInterface, Object, Extension>::createExtensio
 template <class ExtensionInterface, class Object, class Extension>
 void ExtensionFactory<ExtensionInterface, Object, Extension>::registerExtension(QExtensionManager *mgr, const QString &iid)
 {
-    ExtensionFactory *factory = new ExtensionFactory(iid, mgr);
+    auto *factory = new ExtensionFactory(iid, mgr);
     mgr->registerExtensions(factory, iid);
 }
 }  // namespace qdesigner_internal

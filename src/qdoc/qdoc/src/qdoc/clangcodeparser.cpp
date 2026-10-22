@@ -6,20 +6,25 @@
 
 #include "access.h"
 #include "classnode.h"
-#include "codechunk.h"
 #include "config.h"
+#include "doc.h"
 #include "enumnode.h"
 #include "functionnode.h"
+#include "genustypes.h"
+#include "inclusionpolicy.h"
 #include "namespacenode.h"
 #include "propertynode.h"
 #include "qdocdatabase.h"
 #include "typedefnode.h"
 #include "variablenode.h"
+#include "sourcefileparser.h"
 #include "utilities.h"
 
 #include <QtCore/qdebug.h>
+#include <QtCore/qdir.h>
 #include <QtCore/qelapsedtimer.h>
 #include <QtCore/qfile.h>
+#include <QtCore/qregularexpression.h>
 #include <QtCore/qscopedvaluerollback.h>
 #include <QtCore/qtemporarydir.h>
 #include <QtCore/qtextstream.h>
@@ -27,10 +32,12 @@
 
 #include <clang-c/Index.h>
 
+#include <clang/AST/ASTConcept.h>
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclFriend.h>
 #include <clang/AST/DeclTemplate.h>
 #include <clang/AST/Expr.h>
+#include <clang/AST/ExprConcepts.h>
 #include <clang/AST/Type.h>
 #include <clang/AST/TypeLoc.h>
 #include <clang/Basic/SourceLocation.h>
@@ -41,9 +48,14 @@
 #include "clang/AST/QualTypeNames.h"
 #include "template_declaration.h"
 
+#include <algorithm>
 #include <cstdio>
+#include <optional>
+#include <string_view>
 
 QT_BEGIN_NAMESPACE
+
+using namespace Qt::Literals::StringLiterals;
 
 struct CompilationIndex {
     CXIndex index = nullptr;
@@ -165,12 +177,112 @@ static const clang::Decl* get_cursor_declaration(CXCursor cursor) {
  * representation of a type is acquired as part of parsing with Clang,
  * so as to ensure a consistent behavior and output.
  */
+/*
+ * Ensures that bare "(unnamed)" or "(anonymous)" markers in \a typeName
+ * include the record keyword (struct, union, class). Without
+ * anonymous tag locations, some LLVM versions omit the keyword
+ * for some or all anonymous scopes. This function recovers the correct
+ * keyword for each scope from the RecordDecl hierarchy.
+ *
+ * Only anonymous record types produce scope components in fully qualified
+ * names — anonymous enums don't create "(unnamed enum)::" segments
+ * because their enumerators are injected into the enclosing scope.
+ *
+ * For nested anonymous records such as "(unnamed)::(unnamed)" where the
+ * outer scope is a union and the inner is a struct, each marker receives
+ * its own keyword. The parent walk follows only RecordDecl contexts,
+ * which is sufficient because only anonymous records produce these
+ * scope components in Clang's fully qualified name output.
+ *
+ * The function assumes Clang produces structurally well-formed anonymous
+ * markers: either bare "(unnamed)" or with a keyword "(unnamed struct)".
+ * Malformed spellings would silently consume a keyword entry.
+ */
+static std::string ensureAnonymousTagKeyword(std::string typeName, clang::QualType type)
+{
+    const clang::RecordType *rt = type->getAs<clang::RecordType>();
+    if (!rt)
+        return typeName;
+
+    // Collect keywords from innermost to outermost anonymous scope.
+    std::vector<std::string> keywords;
+    const clang::RecordDecl *decl = rt->getDecl();
+    while (decl) {
+        if (decl->getDeclName().isEmpty())
+            keywords.emplace_back(decl->getKindName());
+        const auto *parent = llvm::dyn_cast<clang::RecordDecl>(decl->getDeclContext());
+        decl = parent;
+    }
+    // Reverse so index 0 is the outermost anonymous scope,
+    // matching left-to-right marker order in the type string.
+    std::reverse(keywords.begin(), keywords.end());
+
+    // Scan left-to-right for "(unnamed" / "(anonymous" prefixes.
+    // Each prefix corresponds to one anonymous scope in the keyword list.
+    // Some LLVM versions already include the keyword (e.g., "(unnamed union)")
+    // while others produce bare "(unnamed)". Only inject when missing.
+    static constexpr std::string_view prefixes[] = { "(unnamed", "(anonymous" };
+    size_t keywordIndex = 0;
+    size_t pos = 0;
+    while (pos < typeName.size() && keywordIndex < keywords.size()) {
+        std::string_view foundPrefix;
+        size_t foundPos = std::string::npos;
+        for (auto prefix : prefixes) {
+            size_t p = typeName.find(prefix, pos);
+            if (p < foundPos) {
+                foundPos = p;
+                foundPrefix = prefix;
+            }
+        }
+        if (foundPos == std::string::npos)
+            break;
+
+        size_t afterPrefix = foundPos + foundPrefix.size();
+        if (afterPrefix < typeName.size() && typeName[afterPrefix] == ')') {
+            // Bare marker — inject the keyword before ')'.
+            typeName.insert(afterPrefix, " " + keywords[keywordIndex]);
+            pos = afterPrefix + 1 + keywords[keywordIndex].size() + 1;
+        } else {
+            // Already has a keyword — skip past the closing ')'.
+            size_t closePos = typeName.find(')', afterPrefix);
+            pos = (closePos != std::string::npos) ? closePos + 1 : afterPrefix;
+        }
+        ++keywordIndex;
+    }
+    return typeName;
+}
+
 static std::string get_fully_qualified_type_name(clang::QualType type, const clang::ASTContext& declaration_context) {
-     return clang::TypeName::getFullyQualifiedName(
-        type,
-        declaration_context,
-        declaration_context.getPrintingPolicy()
+    auto policy = declaration_context.getPrintingPolicy();
+#if LIBCLANG_VERSION_MAJOR >= 23
+    policy.AnonymousTagNameStyle = llvm::to_underlying(clang::PrintingPolicy::AnonymousTagMode::Plain);
+#else
+    policy.AnonymousTagLocations = false;
+#endif
+    std::string result = clang::TypeName::getFullyQualifiedName(type, declaration_context, policy);
+    return ensureAnonymousTagKeyword(std::move(result), type);
+}
+
+/*
+ * Normalizes anonymous type names in strings that do not come through
+ * get_fully_qualified_type_name(), such as cursor spelling results.
+ * Strips file-path locations from anonymous type names, transforming
+ * patterns such as "(unnamed struct at /path/file.h:67)" into
+ * "(unnamed struct)". The single-word token between the marker and
+ * " at " is preserved as-is — this is intentionally broader than
+ * just C++ record keywords so that any Clang spelling passes through
+ * without an exhaustive keyword list.
+ */
+static QString cleanAnonymousTypeName(const QString &typeName) {
+    if (!typeName.contains("(unnamed "_L1) && !typeName.contains("(anonymous "_L1))
+        return typeName;
+
+    static const QRegularExpression pattern(
+        R"(\((unnamed|anonymous)(\s+\w+)\s+at\s+[^)]+\))"
     );
+    QString cleaned = typeName;
+    cleaned.replace(pattern, "(\\1\\2)"_L1);
+    return cleaned;
 }
 
 /*
@@ -196,6 +308,28 @@ static std::string get_expression_as_string(const clang::Expr* expression, const
     default_value = default_value.trimmed();
 
     return default_value.toStdString();
+}
+
+/*
+ * Recursively walks a constraint expression and collects the fully-qualified
+ * name of every concept referenced by a ConceptSpecializationExpr in the
+ * subtree.
+ *
+ * The walker shares the AST traversal context that the existing requires-clause
+ * extraction already runs through, so the cost is one extra recursive descent
+ * per constrained item — no second visitor and no second translation-unit pass.
+ */
+static void collect_concept_references(const clang::Stmt *node,
+                                       std::vector<std::string> &out)
+{
+    if (!node)
+        return;
+    if (const auto *cse = llvm::dyn_cast<clang::ConceptSpecializationExpr>(node)) {
+        if (const auto *concept_decl = cse->getNamedConcept())
+            out.push_back(concept_decl->getQualifiedNameAsString());
+    }
+    for (const clang::Stmt *child : node->children())
+        collect_concept_references(child, out);
 }
 
 /*
@@ -337,6 +471,150 @@ static QString fromCXString(CXString &&string)
 }
 
 /*
+ * Unwraps ElaboratedType (LLVM <= 21 only) to find the first
+ * TemplateSpecializationType at or just below the given type.
+ *
+ * This does not perform a general desugar walk. It handles the
+ * specific sugar shape that Clang produces for type alias template
+ * specializations used in Qt SFINAE patterns.
+ */
+static const clang::TemplateSpecializationType *find_template_specialization_through_sugar(
+        const clang::Type *type)
+{
+    // Qt's deepest SFINAE alias nesting is 2–3 levels. The limit
+    // guards against pathological types that could loop indefinitely.
+    for (int depth = 0; depth < 10 && type; ++depth) {
+        if (auto *tst = llvm::dyn_cast<clang::TemplateSpecializationType>(type))
+            return tst;
+
+#if LIBCLANG_VERSION_MAJOR < 22
+        // LLVM <= 21 wraps TemplateSpecializationType in ElaboratedType
+        if (auto *elaborated = llvm::dyn_cast<clang::ElaboratedType>(type)) {
+            type = elaborated->getNamedType().getTypePtr();
+            continue;
+        }
+#endif
+
+        // Not a type we can unwrap further
+        break;
+    }
+
+    return nullptr;
+}
+
+/*
+ * Returns true if the given qualified name ends with "enable_if"
+ * or "enable_if_t".
+ */
+static bool is_enable_if_name(const std::string &qualified_name)
+{
+    auto ends_with = [](const std::string &str, const std::string &suffix) {
+        return str.size() >= suffix.size()
+               && str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0;
+    };
+
+    return ends_with(qualified_name, "enable_if_t")
+           || ends_with(qualified_name, "enable_if");
+}
+
+/*
+ * Detects whether a non-type template parameter encodes a SFINAE
+ * constraint via std::enable_if_t.
+ *
+ * Qt uses SFINAE constraints as unnamed non-type template parameters
+ * with a default value of true, where the parameter type is a
+ * type alias that resolves through enable_if_t. For example:
+ *
+ *     template <typename T, if_integral<T> = true>
+ *
+ * where if_integral<T> is an alias for
+ * std::enable_if_t<std::is_integral_v<T>, bool>.
+ *
+ * Detection targets unnamed NTTPs specifically. Named non-type
+ * template parameters are not treated as SFINAE constraints, even
+ * if their type resolves through enable_if_t, because named
+ * parameters carry explicit meaning that should be preserved in
+ * the rendered signature. A default value is not required — \fn
+ * commands often omit the "= true" default.
+ *
+ * After finding the outermost TemplateSpecializationType (unwrapping
+ * ElaboratedType on LLVM <= 21), the detection desugars inward to
+ * verify that enable_if or enable_if_t appears in the chain.
+ */
+static std::optional<SfinaeConstraint> detect_sfinae_constraint(
+        const clang::NonTypeTemplateParmDecl *param)
+{
+    if (!param->getName().empty())
+        return std::nullopt;
+
+    auto policy = param->getASTContext().getPrintingPolicy();
+
+    const clang::Type *type = param->getType().getTypePtr();
+
+    auto *alias_type = find_template_specialization_through_sugar(type);
+    if (!alias_type) {
+        // Heuristic fallback for dependent nested-alias cases. When
+        // the outer template parameter is dependent, Clang represents
+        // the type as DependentNameType rather than
+        // TemplateSpecializationType, so the sugar chain cannot be
+        // walked to verify enable_if. For example:
+        //
+        //   template <class T>
+        //   template <typename X, QPointer<T>::if_convertible<X> = true>
+        //
+        // Clang cannot resolve QPointer<T>::if_convertible<X> because
+        // T is dependent. The fallback requires both a default value
+        // (SFINAE parameters always have one — the caller never
+        // provides the argument) and angle brackets in the printed
+        // type name (indicating a template specialization applied to
+        // type parameters).
+        if (!param->hasDefaultArgument())
+            return std::nullopt;
+
+        std::string type_name = param->getType().getAsString(policy);
+        if (type_name.find('<') != std::string::npos)
+            return SfinaeConstraint{ std::move(type_name) };
+
+        return std::nullopt;
+    }
+
+    auto *alias_decl = alias_type->getTemplateName().getAsTemplateDecl();
+    if (!alias_decl)
+        return std::nullopt;
+
+    // Walk the sugar chain to verify enable_if / enable_if_t is present
+    bool found_enable_if = false;
+    const clang::Type *sugar = alias_type->desugar().getTypePtr();
+
+    for (int depth = 0; depth < 10 && sugar; ++depth) {
+        auto *tst = find_template_specialization_through_sugar(sugar);
+        if (!tst)
+            break;
+
+        if (auto *decl = tst->getTemplateName().getAsTemplateDecl()) {
+            if (is_enable_if_name(decl->getQualifiedNameAsString())) {
+                found_enable_if = true;
+                break;
+            }
+        }
+
+        sugar = tst->desugar().getTypePtr();
+    }
+
+    if (!found_enable_if)
+        return std::nullopt;
+
+    // Print from the original QualType (not the unwrapped TST) to
+    // preserve scope qualification. On LLVM <= 21 the ElaboratedType
+    // sugar carries the namespace qualifier; on LLVM 22+ the qualifier
+    // is embedded in the type name directly. The printed output is
+    // the same either way.
+    return SfinaeConstraint{
+        param->getType().getAsString(policy)
+    };
+}
+
+/*
  * Returns an intermediate representation that models the the given
  * template declaration.
  */
@@ -349,6 +627,8 @@ static RelaxedTemplateDeclaration get_template_declaration(const clang::Template
     for (auto template_parameter : template_parameters->asArray()) {
         auto kind{RelaxedTemplateParameter::Kind::TypeTemplateParameter};
         std::string type{};
+
+        std::optional<SfinaeConstraint> sfinae{};
 
         if (auto non_type_template_parameter = llvm::dyn_cast<clang::NonTypeTemplateParmDecl>(template_parameter)) {
             kind = RelaxedTemplateParameter::Kind::NonTypeTemplateParameter;
@@ -385,6 +665,8 @@ static RelaxedTemplateDeclaration get_template_declaration(const clang::Template
             //         Doesn't really impact performance in a
             //         meaningful way so it can be kept while waiting.
             if (QString::fromStdString(type).startsWith("typename ")) type.erase(0, std::string("typename ").size());
+
+            sfinae = detect_sfinae_constraint(non_type_template_parameter);
         }
 
         auto template_template_parameter = llvm::dyn_cast<clang::TemplateTemplateParmDecl>(template_parameter);
@@ -394,15 +676,87 @@ static RelaxedTemplateDeclaration get_template_declaration(const clang::Template
             kind,
             template_parameter->isTemplateParameterPack(),
             {
-                type,
+                std::move(type),
                 template_parameter->getNameAsString(),
                 get_default_value_initializer_as_string(template_parameter)
             },
             (template_template_parameter ?
                 std::optional<TemplateDeclarationStorage>(TemplateDeclarationStorage{
                     get_template_declaration(template_template_parameter).parameters
-                }) : std::nullopt)
+                }) : std::nullopt),
+            std::move(sfinae),
+            std::nullopt
         });
+
+        // Direct concept-on-template-parameter form, such as
+        // \c {template<Sortable T>}. The constraint hangs off the
+        // \c {TemplateTypeParmDecl} rather than appearing in a requires clause.
+        // The constraint's named concept is reachable as a \c {NamedDecl}, so
+        // its qualified name is available via getQualifiedNameAsString().
+        //
+        // Scope note: this extracts the type-template-parameter form only.
+        // A constrained-auto non-type template parameter, such as
+        // \c {template <Integral auto N>}, surfaces as a NonTypeTemplateParmDecl
+        // whose type contains a constrained AutoType, and is not covered here.
+        if (const auto *type_template_parameter =
+                llvm::dyn_cast<clang::TemplateTypeParmDecl>(template_parameter)) {
+            if (type_template_parameter->hasTypeConstraint()) {
+                if (const clang::TypeConstraint *constraint =
+                        type_template_parameter->getTypeConstraint()) {
+                    if (const clang::NamedDecl *concept_decl =
+                            constraint->getNamedConcept()) {
+                        template_declaration_ir.referenced_concepts.push_back(
+                                concept_decl->getQualifiedNameAsString());
+                        template_declaration_ir.parameters.back().concept_name =
+                                concept_decl->getQualifiedNameAsString();
+                    }
+                }
+            }
+        }
+    }
+
+    // Collect the explicit requires clause first, if present.
+    std::string explicit_requires;
+    if (const clang::Expr *requires_clause = template_parameters->getRequiresClause()) {
+        explicit_requires = QString::fromStdString(get_expression_as_string(
+                requires_clause, template_declaration->getASTContext())).simplified().toStdString();
+        collect_concept_references(requires_clause,
+                                   template_declaration_ir.referenced_concepts);
+    }
+
+    // Synthesize a requires clause from detected SFINAE constraints.
+    // SFINAE parameters are annotated but kept in the parameter list
+    // so that \fn matching (which compares parameter counts and types)
+    // still works when detection succeeds on one path but not the
+    // other. Rendering functions skip annotated parameters and emit
+    // the synthesized requires clause instead.
+    {
+        std::string synthesized;
+        const auto &params = template_declaration_ir.parameters;
+
+        for (const auto &param : params) {
+            if (param.sfinae_constraint) {
+                if (!synthesized.empty())
+                    synthesized += " && ";
+                synthesized += param.sfinae_constraint->alias_with_args;
+            }
+        }
+
+        // Combine synthesized SFINAE constraints with explicit requires
+        // clause when both are present. The explicit clause is wrapped
+        // in parentheses to preserve its precedence.
+        if (!synthesized.empty() && !explicit_requires.empty())
+            template_declaration_ir.requires_clause = synthesized + " && (" + explicit_requires + ")";
+        else if (!synthesized.empty())
+            template_declaration_ir.requires_clause = std::move(synthesized);
+        else if (!explicit_requires.empty())
+            template_declaration_ir.requires_clause = std::move(explicit_requires);
+    }
+
+    {
+        auto &refs = template_declaration_ir.referenced_concepts;
+        std::sort(refs.begin(), refs.end());
+        refs.erase(std::unique(refs.begin(), refs.end()), refs.end());
     }
 
     return template_declaration_ir;
@@ -471,7 +825,7 @@ static QString readFile(CXFile cxFile, unsigned int offset1, unsigned int offset
 
     QFile file(QString::fromUtf8(fileName));
     if (file.open(QIODeviceBase::ReadOnly)) { // binary to match clang offsets
-        FileCacheEntry entry{fileName, file.readAll()};
+        FileCacheEntry entry{std::move(fileName), file.readAll()};
         cache.prepend(entry);
         while (cache.size() > 5)
             cache.removeLast();
@@ -560,6 +914,84 @@ static QString reconstructQualifiedPathForCursor(CXCursor cur)
 }
 
 /*!
+  \internal
+
+  Extract a class name from a Clang parameter type, stripping references,
+  pointers, and qualifiers. Returns \c {std::nullopt} if the type doesn't
+  represent a class.
+ */
+static std::optional<QString> classNameFromParameterType(clang::QualType param_type)
+{
+    param_type = param_type.getNonReferenceType();
+    while (param_type->isPointerType())
+        param_type = param_type->getPointeeType();
+    param_type = param_type.getUnqualifiedType();
+
+    if (param_type->isBuiltinType())
+        return std::nullopt;
+
+    if (const auto *record_type = param_type->getAs<clang::RecordType>()) {
+        if (const auto *record_decl = record_type->getDecl())
+            return QString::fromStdString(record_decl->getQualifiedNameAsString());
+    }
+
+    // The type may be incomplete (forward-declared or unknown during \fn parsing).
+    // Extract the class name from the type spelling if it looks like a class.
+    QString class_name = QString::fromStdString(param_type.getAsString());
+    class_name.remove("const "_L1).remove("volatile "_L1);
+    class_name.remove("class "_L1).remove("struct "_L1);
+    class_name = class_name.trimmed();
+
+    if (class_name.isEmpty() || class_name.contains('('_L1) || class_name.contains('['_L1))
+        return std::nullopt;
+
+    // Strip template arguments (e.g. "QList<MyClass>" becomes "QList") as
+    // hidden friends are declared in the primary type.
+    if (auto angle = class_name.indexOf('<'_L1); angle > 0)
+        class_name.truncate(angle);
+
+    return class_name;
+}
+
+/*!
+  \internal
+
+  Search for hidden friend candidates by inspecting parameter types.
+  When a \fn command uses unqualified syntax for a hidden friend, the
+  initial name lookup won't find it because hidden friends are stored
+  under their enclosing class, not in the global namespace. This
+  function examines the parameter types of \a func_decl to locate
+  classes that may contain hidden friends with matching names.
+
+  Appends any found hidden friend nodes to \a candidates.
+ */
+static void findHiddenFriendCandidates(QDocDatabase *qdb, const QString &funcName,
+                                       const clang::FunctionDecl *func_decl, NodeVector &candidates)
+{
+    QSet<ClassNode *> searched_classes;
+    for (const auto *param : func_decl->parameters()) {
+        auto class_name = classNameFromParameterType(param->getType());
+        if (!class_name)
+            continue;
+
+        auto *class_node = qdb->findClassNode(class_name->split("::"_L1));
+        if (!class_node || searched_classes.contains(class_node))
+            continue;
+
+        searched_classes.insert(class_node);
+        NodeVector class_candidates;
+        class_node->findChildren(funcName, class_candidates);
+
+        for (Node *candidate : class_candidates) {
+            if (!candidate->isFunction(Genus::CPP))
+                continue;
+            if (static_cast<FunctionNode *>(candidate)->isHiddenFriend())
+                candidates.append(candidate);
+        }
+    }
+}
+
+/*!
   Find the node from the QDocDatabase \a qdb that corresponds to the declaration
   represented by the cursor \a cur, if it exists.
  */
@@ -572,13 +1004,32 @@ static Node *findNodeForCursor(QDocDatabase *qdb, CXCursor cur)
         return qdb->primaryTreeRoot();
 
     Node *p = findNodeForCursor(qdb, clang_getCursorSemanticParent(cur));
-    if (p == nullptr)
-        return nullptr;
-    if (!p->isAggregate())
+    // Special case; if the cursor represents a template type|non-type|template parameter
+    // and its semantic parent is a function, return a pointer to the function node.
+    if (p && p->isFunction(Genus::CPP)) {
+        switch (kind) {
+        case CXCursor_TemplateTypeParameter:
+        case CXCursor_NonTypeTemplateParameter:
+        case CXCursor_TemplateTemplateParameter:
+            return p;
+        default:
+            break;
+        }
+    }
+
+    // ...otherwise, the semantic parent must be an Aggregate node.
+    if (!p || !p->isAggregate())
         return nullptr;
     auto parent = static_cast<Aggregate *>(p);
 
-    QString name = fromCXString(clang_getCursorSpelling(cur));
+    QString name;
+    if (clang_Cursor_isAnonymous(cur)) {
+        name = Utilities::uniqueIdentifier(
+                fromCXSourceLocation(clang_getCursorLocation(cur)),
+                QLatin1String("anonymous"));
+    } else {
+        name = fromCXString(clang_getCursorSpelling(cur));
+    }
     switch (kind) {
     case CXCursor_Namespace:
         return parent->findNonfunctionChild(name, &Node::isNamespace);
@@ -595,6 +1046,31 @@ static Node *findNodeForCursor(QDocDatabase *qdb, CXCursor cur)
     case CXCursor_ConversionFunction: {
         NodeVector candidates;
         parent->findChildren(functionName(cur), candidates);
+        // Hidden friend functions are recorded under their lexical parent in the database
+        auto *cur_decl = get_cursor_declaration(cur);
+        if (candidates.isEmpty() && cur_decl && cur_decl->getFriendObjectKind() != clang::Decl::FOK_None) {
+            if (auto *lexical_parent = findNodeForCursor(qdb, clang_getCursorLexicalParent(cur));
+                    lexical_parent && lexical_parent->isAggregate() && lexical_parent != parent) {
+                static_cast<Aggregate *>(lexical_parent)->findChildren(functionName(cur), candidates);
+            }
+        }
+
+        // Fallback for hidden friends documented with \fn using unqualified syntax.
+        // Hidden friends are stored under their enclosing class, not in the global
+        // namespace, so the initial findChildren won't find them. Search parameter
+        // types to locate them, even when other candidates (e.g. a same-named
+        // template) already exist. (QTBUG-145790)
+        const bool hasHiddenFriend =
+                std::any_of(candidates.cbegin(), candidates.cend(), [](const Node *n) {
+                    return n->isFunction(Genus::CPP)
+                            && static_cast<const FunctionNode *>(n)->isHiddenFriend();
+                });
+        if (!hasHiddenFriend) {
+            auto *func_decl = cur_decl ? cur_decl->getAsFunction() : nullptr;
+            if (func_decl)
+                findHiddenFriendCandidates(qdb, functionName(cur), func_decl, candidates);
+        }
+
         if (candidates.isEmpty())
             return nullptr;
 
@@ -610,7 +1086,7 @@ static Node *findNodeForCursor(QDocDatabase *qdb, CXCursor cur)
             );
 
         for (Node *candidate : std::as_const(candidates)) {
-            if (!candidate->isFunction(Node::CPP))
+            if (!candidate->isFunction(Genus::CPP))
                 continue;
 
             auto fn = static_cast<FunctionNode *>(candidate);
@@ -627,8 +1103,17 @@ static Node *findNodeForCursor(QDocDatabase *qdb, CXCursor cur)
 
             const Parameters &parameters = fn->parameters();
 
-            if (parameters.count() != numArg + isVariadic)
+            if (parameters.count() != numArg + isVariadic) {
+                // Ignore possible last argument of type QPrivateSignal as it may have been dropped
+                if (numArg > 0 && parameters.isPrivateSignal() &&
+                        (parameters.isEmpty() || !parameters.last().type().endsWith(
+                                QLatin1String("QPrivateSignal")))) {
+                    if (parameters.count() != --numArg + isVariadic)
+                        continue;
+                } else {
                 continue;
+                }
+            }
 
             if (fn->isConst() != bool(clang_CXXMethod_isConst(cur)))
                 continue;
@@ -644,39 +1129,50 @@ static Node *findNodeForCursor(QDocDatabase *qdb, CXCursor cur)
 
             auto function_declaration = get_cursor_declaration(cur)->getAsFunction();
 
-            bool different = false;
+            bool typesDiffer = false;
             for (int i = 0; i < numArg; ++i) {
-                CXType argType = clang_getArgType(funcType, i);
+                auto *paramDecl = function_declaration->getParamDecl(i);
+                auto paramType = paramDecl->getOriginalType();
 
                 if (args.size() <= i)
                     args.append(QString::fromStdString(get_fully_qualified_type_name(
-                        function_declaration->getParamDecl(i)->getOriginalType(),
-                        function_declaration->getASTContext()
+                        paramType, function_declaration->getASTContext()
                     )));
 
                 QString recordedType = parameters.at(i).type();
                 QString typeSpelling = args.at(i);
 
-                different = recordedType != typeSpelling;
+                typesDiffer = recordedType != typeSpelling;
 
-                // Retry with a canonical type spelling
-                if (different && (argType.kind == CXType_Typedef || argType.kind == CXType_Elaborated)) {
-                    QStringView canonicalType = parameters.at(i).canonicalType();
-                    if (!canonicalType.isEmpty()) {
-                        different = canonicalType !=
-                            QString::fromStdString(get_fully_qualified_type_name(
-                                function_declaration->getParamDecl(i)->getOriginalType().getCanonicalType(),
-                                function_declaration->getASTContext()
-                            ));
+                // Retry with a canonical type spelling unless the parameter is a bare
+                // template type parameter, such as T but not const T& or MyContainer<T>.
+                // Wrapped forms are safe because both sides of the comparison are
+                // canonicalized in the same way. Exclude bare TemplateTypeParmType
+                // because canonicalization removes the spelled Q_QDOC template
+                // parameter name and can make distinct Q_QDOC-declared signatures
+                // appear identical during matching.
+                if (typesDiffer) {
+                    const bool isBareTemplateTypeParm =
+                        paramType.getTypePtrOrNull()
+                        && llvm::isa<clang::TemplateTypeParmType>(paramType.getTypePtr());
+                    if (!isBareTemplateTypeParm) {
+                        QStringView canonicalType = parameters.at(i).canonicalType();
+                        if (!canonicalType.isEmpty()) {
+                            typesDiffer = canonicalType !=
+                                QString::fromStdString(get_fully_qualified_type_name(
+                                    paramType.getCanonicalType(),
+                                    function_declaration->getASTContext()
+                                ));
+                        }
                     }
                 }
 
-                if (different) {
+                if (typesDiffer) {
                     break;
                 }
             }
 
-            if (!different)
+            if (!typesDiffer)
                 return fn;
         }
         return nullptr;
@@ -709,14 +1205,64 @@ static void setOverridesForFunction(FunctionNode *fn, CXCursor cursor)
     clang_disposeOverriddenCursors(overridden);
 }
 
+/*!
+    \internal
+    Auto-generates documentation for explicitly defaulted or deleted
+    special member functions that don't already have documentation.
+*/
+static void autoGenerateSmfDoc(FunctionNode *fn, const QString &className)
+{
+    if (fn->hasDoc())
+        return;
+    if (!fn->isExplicitlyDefaulted() && !fn->isDeletedAsWritten())
+        return;
+    if (!fn->isSpecialMemberFunction())
+        return;
+
+    QString docSource;
+    if (fn->isDtor()) {
+        docSource = u"Destroys the instance of \\notranslate %1."_s.arg(className);
+        if (fn->isVirtual())
+            docSource += u" This destructor is virtual."_s;
+    } else if (fn->isCtor()) {
+        docSource = u"Default-constructs an instance of \\notranslate %1."_s.arg(className);
+    } else if (fn->isCCtor()) {
+        docSource = u"Copy-constructs an instance of \\notranslate %1."_s.arg(className);
+    } else if (fn->isMCtor()) {
+        docSource = u"Move-constructs an instance of \\notranslate %1."_s.arg(className);
+    } else if (fn->isCAssign() || fn->isMAssign()) {
+        const auto &params = fn->parameters();
+        const QString other = (!params.isEmpty() && !params.at(0).name().isEmpty())
+                ? params.at(0).name()
+                : u"other"_s;
+        docSource = fn->isCAssign()
+                ? u"Copy-assigns \\a %1 to this \\notranslate %2 instance."_s.arg(other, className)
+                : u"Move-assigns \\a %1 to this \\notranslate %2 instance."_s.arg(other, className);
+    }
+
+    if (docSource.isEmpty())
+        return;
+
+    if (fn->isDeletedAsWritten())
+        docSource += u" This function is deleted."_s;
+
+    static const QSet<QString> noMetaCommands;
+    static const QSet<QString> noTopics;
+    Doc doc(fn->location(), fn->location(), docSource, noMetaCommands, noTopics);
+    doc.markAutoGenerated();
+    fn->setDoc(doc);
+}
+
 class ClangVisitor
 {
 public:
-    ClangVisitor(QDocDatabase *qdb, const std::set<Config::HeaderFilePath> &allHeaders)
-        : qdb_(qdb), parent_(qdb->primaryTreeRoot())
+    ClangVisitor(QDocDatabase *qdb, const std::set<Config::HeaderFilePath> &allHeaders,
+                 const Config::InternalFilePatterns& internalFilePatterns)
+        : qdb_(qdb), parent_(qdb->primaryTreeRoot()),
+          internalFilePatterns_(internalFilePatterns)
     {
         std::transform(allHeaders.cbegin(), allHeaders.cend(), std::inserter(allHeaders_, allHeaders_.begin()),
-                       [](const auto& header_file_path) { return header_file_path.filename; });
+                       [](const auto& header_file_path) -> const QString& { return header_file_path.filename; });
     }
 
     QDocDatabase *qdocDB() { return qdb_; }
@@ -727,6 +1273,7 @@ public:
             auto loc = clang_getCursorLocation(cur);
             if (clang_Location_isFromMainFile(loc))
                 return visitSource(cur, loc);
+
             CXFile file;
             clang_getFileLocation(loc, &file, nullptr, nullptr, nullptr);
             bool isInteresting = false;
@@ -766,6 +1313,7 @@ public:
     Node *nodeForCommentAtLocation(CXSourceLocation loc, CXSourceLocation nextCommentLoc);
 
 private:
+    QmlNativeTypeAttribute detectQmlNativeTypeAttribute(CXCursor cursor);
     /*!
       SimpleLoc represents a simple location in the main source file,
       which can be used as a key in a QMap.
@@ -789,6 +1337,7 @@ private:
     Aggregate *parent_;
     std::set<QString> allHeaders_;
     QHash<CXFile, bool> isInterestingCache_; // doing a canonicalFilePath is slow, so keep a cache.
+    const Config::InternalFilePatterns& internalFilePatterns_;
 
     /*!
         Returns true if the symbol should be ignored for the documentation.
@@ -815,6 +1364,74 @@ private:
     void readParameterNamesAndAttributes(FunctionNode *fn, CXCursor cursor);
     Aggregate *getSemanticParent(CXCursor cursor);
 };
+
+/*!
+  Detects if a class cursor contains declarations specific to QML types:
+
+  \details {QML_SINGLETON macro}
+      Returns QmlNativeTypeAttribute::Singleton if the macro is detected.
+
+      The \e QML_SINGLETON macro expands to multiple items including:
+      \list
+          \li \c {Q_CLASSINFO("QML.Singleton", "true")}
+          \li \c {enum class QmlIsSingleton}
+      \endlist
+  \enddetails
+
+  \details {QML_UNCREATABLE macro}
+      Returns ClassNode::QmlNativeTypeAttribute::Uncreatable if the macro is detected.
+
+      The \e QML_UNCREATABLE macro expands to multiple items including:
+      \list
+          \li \c {Q_CLASSINFO("QML.Creatable", "false")}
+          \li \c {enum class QmlIsUncreatable}
+      \endlist
+  \enddetails
+
+  This method looks for the above expansion artifacts to detect the macros.
+  If no artifacts are found, returns QmlNativeTypeAttribute::None
+  (that is, a standard instantiable QML type).
+*/
+QmlNativeTypeAttribute ClangVisitor::detectQmlNativeTypeAttribute(CXCursor cursor)
+{
+    QmlNativeTypeAttribute attr{ QmlNativeTypeAttribute::None };
+
+    visitChildrenLambda(cursor, [&attr](CXCursor child) -> CXChildVisitResult {
+        // Look for Q_CLASSINFO calls that indicate QML.Singleton or QML.Creatable = false
+        if (clang_getCursorKind(child) == CXCursor_CallExpr) {
+            CXSourceRange range = clang_getCursorExtent(child);
+            QString sourceText = getSpelling(range);
+            static const QRegularExpression qmlClassInfoPattern(
+                    R"(Q_CLASSINFO\s*\(\s*["\']QML\.(Singleton|Creatable)["\']\s*,\s*["\'](true|false)["\']\s*\))");
+            const auto match = qmlClassInfoPattern.match(sourceText);
+            if (match.hasMatch()) {
+                if (match.captured(1) == "Singleton"_L1 && match.captured(2) == "true"_L1) {
+                    attr = QmlNativeTypeAttribute::Singleton;
+                    return CXChildVisit_Break;
+                } else if (match.captured(1) == "Creatable"_L1 && match.captured(2) == "false"_L1) {
+                    attr = QmlNativeTypeAttribute::Uncreatable;
+                    return CXChildVisit_Break;
+                }
+            }
+        }
+
+        // Also check for enum class QmlIsSingleton which is part of the macro expansion
+        if (clang_getCursorKind(child) == CXCursor_EnumDecl) {
+            QString spelling = fromCXString(clang_getCursorSpelling(child));
+            if (spelling == "QmlIsSingleton"_L1) {
+                attr = QmlNativeTypeAttribute::Singleton;
+                return CXChildVisit_Break;
+            } else if (spelling == "QmlIsUncreatable"_L1) {
+                attr = QmlNativeTypeAttribute::Uncreatable;
+                return CXChildVisit_Break;
+            }
+        }
+
+        return CXChildVisit_Continue;
+    });
+
+    return attr;
+}
 
 /*!
   Visits a cursor in the .cpp file.
@@ -869,7 +1486,7 @@ CXChildVisitResult ClangVisitor::visitFnSignature(CXCursor cursor, CXSourceLocat
         } else {
             *fnNode = findNodeForCursor(qdb_, cursor);
             if (*fnNode) {
-                if ((*fnNode)->isFunction(Node::CPP)) {
+                if ((*fnNode)->isFunction(Genus::CPP)) {
                     auto *fn = static_cast<FunctionNode *>(*fnNode);
                     readParameterNamesAndAttributes(fn, cursor);
 
@@ -893,7 +1510,7 @@ CXChildVisitResult ClangVisitor::visitFnSignature(CXCursor cursor, CXSourceLocat
                         delete candidate;
                         return CXChildVisit_Continue;
                     }
-                    candidate->setDefault(true);
+                    candidate->setImplicitlyGenerated(true);
                     semanticParent->addChild(*fnNode = candidate);
                 }
             }
@@ -913,25 +1530,36 @@ CXChildVisitResult ClangVisitor::visitHeader(CXCursor cursor, CXSourceLocation l
     switch (kind) {
     case CXCursor_TypeAliasTemplateDecl:
     case CXCursor_TypeAliasDecl: {
-        QString aliasDecl = getSpelling(clang_getCursorExtent(cursor)).simplified();
-        QStringList typeAlias = aliasDecl.split(QLatin1Char('='));
-        if (typeAlias.size() == 2) {
-            typeAlias[0] = typeAlias[0].trimmed();
-            const QLatin1String usingString("using ");
-            qsizetype usingPos = typeAlias[0].indexOf(usingString);
-            if (usingPos != -1) {
-                typeAlias[0].remove(0, usingPos + usingString.size());
-                typeAlias[0] = typeAlias[0].split(QLatin1Char(' ')).first();
-                typeAlias[1] = typeAlias[1].trimmed();
-                auto *ta = new TypeAliasNode(parent_, typeAlias[0], typeAlias[1]);
-                ta->setAccess(fromCX_CXXAccessSpecifier(clang_getCXXAccessSpecifier(cursor)));
-                ta->setLocation(fromCXSourceLocation(clang_getCursorLocation(cursor)));
+        const QString aliasName = fromCXString(clang_getCursorSpelling(cursor));
+        QString aliasedType;
 
-                if (kind == CXCursor_TypeAliasTemplateDecl) {
-                    auto template_decl = llvm::dyn_cast<clang::TemplateDecl>(get_cursor_declaration(cursor));
-                    ta->setTemplateDecl(get_template_declaration(template_decl));
+        const auto *templateDecl = (kind == CXCursor_TypeAliasTemplateDecl)
+                                 ? llvm::dyn_cast<clang::TemplateDecl>(get_cursor_declaration(cursor))
+                                 : nullptr;
+
+        if (kind == CXCursor_TypeAliasTemplateDecl) {
+            // For template aliases, get the underlying TypeAliasDecl from the TemplateDecl
+            if (const auto *aliasTemplate = llvm::dyn_cast<clang::TypeAliasTemplateDecl>(templateDecl)) {
+                if (const auto *aliasDecl = aliasTemplate->getTemplatedDecl()) {
+                    clang::QualType underlyingType = aliasDecl->getUnderlyingType();
+                    aliasedType = QString::fromStdString(underlyingType.getAsString());
                 }
             }
+        } else {
+            // For non-template aliases, get the underlying type via C API
+            const CXType aliasedCXType = clang_getTypedefDeclUnderlyingType(cursor);
+            if (aliasedCXType.kind != CXType_Invalid) {
+                aliasedType = fromCXString(clang_getTypeSpelling(aliasedCXType));
+            }
+        }
+
+        if (!aliasedType.isEmpty()) {
+            auto *ta = new TypeAliasNode(parent_, aliasName, aliasedType);
+            ta->setAccess(fromCX_CXXAccessSpecifier(clang_getCXXAccessSpecifier(cursor)));
+            ta->setLocation(fromCXSourceLocation(clang_getCursorLocation(cursor)));
+
+            if (templateDecl)
+                ta->setTemplateDecl(get_template_declaration(templateDecl));
         }
         return CXChildVisit_Continue;
     }
@@ -949,7 +1577,7 @@ CXChildVisitResult ClangVisitor::visitHeader(CXCursor cursor, CXSourceLocation l
         if (findNodeForCursor(qdb_, cursor)) // Was already parsed, probably in another TU
             return CXChildVisit_Continue;
 
-        QString className = fromCXString(clang_getCursorSpelling(cursor));
+        QString className = cleanAnonymousTypeName(fromCXString(clang_getCursorSpelling(cursor)));
 
         Aggregate *semanticParent = getSemanticParent(cursor);
         if (semanticParent && semanticParent->findNonfunctionChild(className, &Node::isClassNode)) {
@@ -959,15 +1587,26 @@ CXChildVisitResult ClangVisitor::visitHeader(CXCursor cursor, CXSourceLocation l
         CXCursorKind actualKind = (kind == CXCursor_ClassTemplate) ?
                  clang_getTemplateCursorKind(cursor) : kind;
 
-        Node::NodeType type = Node::Class;
+        NodeType type = NodeType::Class;
         if (actualKind == CXCursor_StructDecl)
-            type = Node::Struct;
+            type = NodeType::Struct;
         else if (actualKind == CXCursor_UnionDecl)
-            type = Node::Union;
+            type = NodeType::Union;
 
         auto *classe = new ClassNode(type, semanticParent, className);
         classe->setAccess(fromCX_CXXAccessSpecifier(clang_getCXXAccessSpecifier(cursor)));
-        classe->setLocation(fromCXSourceLocation(clang_getCursorLocation(cursor)));
+
+        auto location = fromCXSourceLocation(clang_getCursorLocation(cursor));
+        classe->setLocation(location);
+
+        if (!internalFilePatterns_.exactMatches.isEmpty() || !internalFilePatterns_.globPatterns.isEmpty()
+            || !internalFilePatterns_.regexPatterns.isEmpty()) {
+            if (Config::matchesInternalFilePattern(location.filePath(), internalFilePatterns_))
+                classe->setStatus(Status::Internal);
+        }
+
+        classe->setAnonymous(clang_Cursor_isAnonymous(cursor));
+        classe->setQmlNativeTypeAttribute(detectQmlNativeTypeAttribute(cursor));
 
         if (kind == CXCursor_ClassTemplate) {
             auto template_declaration = llvm::dyn_cast<clang::TemplateDecl>(get_cursor_declaration(cursor));
@@ -1046,6 +1685,9 @@ CXChildVisitResult ClangVisitor::visitHeader(CXCursor cursor, CXSourceLocation l
             fn->setTemplateDecl(get_template_declaration(template_declaration));
         }
 
+        if (!clang_Location_isInSystemHeader(loc))
+            autoGenerateSmfDoc(fn, parent_->name());
+
         return CXChildVisit_Continue;
     }
 #if CINDEX_VERSION >= 36
@@ -1062,6 +1704,10 @@ CXChildVisitResult ClangVisitor::visitHeader(CXCursor cursor, CXSourceLocation l
 
         if (clang_Cursor_isAnonymous(cursor)) {
             enumTypeName = "anonymous";
+            // Generate a unique name to enable auto-tying doc comments in headers
+            // to anonymous enum declarations
+            if (Config::instance().get(CONFIG_DOCUMENTATIONINHEADERS).asBool())
+                enumTypeName = Utilities::uniqueIdentifier(fromCXSourceLocation(clang_getCursorLocation(cursor)), enumTypeName);
             if (parent_ && (parent_->isClassNode() || parent_->isNamespace())) {
                 Node *n = parent_->findNonfunctionChild(enumTypeName, &Node::isEnumType);
                 if (n)
@@ -1072,6 +1718,7 @@ CXChildVisitResult ClangVisitor::visitHeader(CXCursor cursor, CXSourceLocation l
             en = new EnumNode(parent_, enumTypeName, clang_EnumDecl_isScoped(cursor));
             en->setAccess(fromCX_CXXAccessSpecifier(clang_getCXXAccessSpecifier(cursor)));
             en->setLocation(fromCXSourceLocation(clang_getCursorLocation(cursor)));
+            en->setAnonymous(clang_Cursor_isAnonymous(cursor));
         }
 
         // Enum values
@@ -1096,7 +1743,7 @@ CXChildVisitResult ClangVisitor::visitHeader(CXCursor cursor, CXSourceLocation l
                 }
             }
 
-            en->addItem(EnumItem(fromCXString(clang_getCursorSpelling(cur)), value));
+            en->addItem(EnumItem(fromCXString(clang_getCursorSpelling(cur)), std::move(value)));
             return CXChildVisit_Continue;
         });
         return CXChildVisit_Continue;
@@ -1169,9 +1816,9 @@ void ClangVisitor::readParameterNamesAndAttributes(FunctionNode *fn, CXCursor cu
         if (kind == CXCursor_AnnotateAttr) {
             QString annotation = fromCXString(clang_getCursorDisplayName(cur));
             if (annotation == QLatin1String("qt_slot")) {
-                fn->setMetaness(FunctionNode::Slot);
+                fn->setMetaness(Metaness::Slot);
             } else if (annotation == QLatin1String("qt_signal")) {
-                fn->setMetaness(FunctionNode::Signal);
+                fn->setMetaness(Metaness::Signal);
             }
             if (annotation == QLatin1String("qt_invokable"))
                 fn->setInvokable(true);
@@ -1230,10 +1877,10 @@ void ClangVisitor::processFunction(FunctionNode *fn, CXCursor cursor)
     if (kind == CXCursor_Constructor
         // a constructor template is classified as CXCursor_FunctionTemplate
         || (kind == CXCursor_FunctionTemplate && fn->name() == parent_->name()))
-        fn->setMetaness(FunctionNode::Ctor);
+        fn->setMetaness(Metaness::Ctor);
     else if (kind == CXCursor_Destructor)
-        fn->setMetaness(FunctionNode::Dtor);
-    else
+        fn->setMetaness(Metaness::Dtor);
+    else if (kind != CXCursor_ConversionFunction)
         fn->setReturnType(QString::fromStdString(get_fully_qualified_type_name(
             function_declaration->getReturnType(),
             function_declaration->getASTContext()
@@ -1241,12 +1888,14 @@ void ClangVisitor::processFunction(FunctionNode *fn, CXCursor cursor)
 
     const clang::CXXConstructorDecl* constructor_declaration = llvm::dyn_cast<const clang::CXXConstructorDecl>(function_declaration);
 
-    if (constructor_declaration && constructor_declaration->isCopyConstructor()) fn->setMetaness(FunctionNode::CCtor);
-    else if (constructor_declaration && constructor_declaration->isMoveConstructor()) fn->setMetaness(FunctionNode::MCtor);
+    if (constructor_declaration && constructor_declaration->isCopyConstructor()) fn->setMetaness(Metaness::CCtor);
+    else if (constructor_declaration && constructor_declaration->isMoveConstructor()) fn->setMetaness(Metaness::MCtor);
 
     const clang::CXXConversionDecl* conversion_declaration = llvm::dyn_cast<const clang::CXXConversionDecl>(function_declaration);
 
     if (function_declaration->isConstexpr()) fn->markConstexpr();
+    if (function_declaration->isExplicitlyDefaulted()) fn->markExplicitlyDefaulted();
+    if (function_declaration->isDeletedAsWritten()) fn->markDeletedAsWritten();
     if (
         (constructor_declaration && constructor_declaration->isExplicit()) ||
         (conversion_declaration && conversion_declaration->isExplicit())
@@ -1254,8 +1903,8 @@ void ClangVisitor::processFunction(FunctionNode *fn, CXCursor cursor)
 
     const clang::CXXMethodDecl* method_declaration = llvm::dyn_cast<const clang::CXXMethodDecl>(function_declaration);
 
-    if (method_declaration && method_declaration->isCopyAssignmentOperator()) fn->setMetaness(FunctionNode::CAssign);
-    else if (method_declaration && method_declaration->isMoveAssignmentOperator()) fn->setMetaness(FunctionNode::MAssign);
+    if (method_declaration && method_declaration->isCopyAssignmentOperator()) fn->setMetaness(Metaness::CAssign);
+    else if (method_declaration && method_declaration->isMoveAssignmentOperator()) fn->setMetaness(Metaness::MAssign);
 
     const clang::FunctionType* function_type = function_declaration->getFunctionType();
     const clang::FunctionProtoType* function_prototype = static_cast<const clang::FunctionProtoType*>(function_type);
@@ -1274,6 +1923,37 @@ void ClangVisitor::processFunction(FunctionNode *fn, CXCursor cursor)
                 fn->markNoexcept(QString::fromStdString(exception_specification_spelling));
         }
     }
+
+    // Collect every concept references a function carries (trailing requires
+    // clause, any constrained-auto parameter types).
+    // From Clang 21 we get an AssociatedConstraint struct for the trailing
+    // clause (upstream commit 49fd0bf35d2e); earlier Clang versions return
+    // a bare Expr*.
+    QStringList referenced_concepts;
+#if LIBCLANG_VERSION_MAJOR >= 21
+    if (const auto trailing_requires = function_declaration->getTrailingRequiresClause();
+        trailing_requires.ConstraintExpr) {
+        QString requires_str = QString::fromStdString(
+            get_expression_as_string(trailing_requires.ConstraintExpr,
+                                     function_declaration->getASTContext()));
+        fn->setTrailingRequiresClause(requires_str.simplified());
+        std::vector<std::string> refs;
+        collect_concept_references(trailing_requires.ConstraintExpr, refs);
+        for (const auto &ref : refs)
+            referenced_concepts << QString::fromStdString(ref);
+    }
+#else
+    if (const clang::Expr *trailing_requires = function_declaration->getTrailingRequiresClause()) {
+        QString requires_str = QString::fromStdString(
+            get_expression_as_string(trailing_requires,
+                                     function_declaration->getASTContext()));
+        fn->setTrailingRequiresClause(requires_str.simplified());
+        std::vector<std::string> refs;
+        collect_concept_references(trailing_requires, refs);
+        for (const auto &ref : refs)
+            referenced_concepts << QString::fromStdString(ref);
+    }
+#endif
 
     CXRefQualifierKind refQualKind = clang_Type_getCXXRefQualifier(funcType);
     if (refQualKind == CXRefQualifier_LValue)
@@ -1302,6 +1982,23 @@ void ClangVisitor::processFunction(FunctionNode *fn, CXCursor cursor)
                 parameter_type.getCanonicalType(),
                 parameter_declaration->getASTContext()
             )));
+
+        // Constrained-auto parameter form, e.g. \c {void f(Sortable auto x)}.
+        if (const clang::AutoType *auto_type = parameter_type->getContainedAutoType()) {
+            if (auto_type->isConstrained()) {
+                if (const clang::NamedDecl *concept_decl =
+                        auto_type->getTypeConstraintConcept()) {
+                    referenced_concepts << QString::fromStdString(
+                            concept_decl->getQualifiedNameAsString());
+                }
+            }
+        }
+    }
+
+    if (!referenced_concepts.isEmpty()) {
+        referenced_concepts.sort();
+        referenced_concepts.removeDuplicates();
+        fn->setReferencedConcepts(std::move(referenced_concepts));
     }
 
     if (parameters.count() > 0) {
@@ -1315,8 +2012,19 @@ void ClangVisitor::processFunction(FunctionNode *fn, CXCursor cursor)
         parameters.append(QStringLiteral("..."));
     readParameterNamesAndAttributes(fn, cursor);
 
-    if (declaration->getFriendObjectKind() != clang::Decl::FOK_None)
+    if (declaration && declaration->getFriendObjectKind() != clang::Decl::FOK_None) {
         fn->setRelatedNonmember(true);
+        Q_ASSERT(function_declaration);
+
+        const bool hasNamespaceScopeRedeclaration =
+                std::any_of(function_declaration->redecls_begin(),
+                            function_declaration->redecls_end(),
+                            [](const clang::FunctionDecl *r) {
+                                return r->getFriendObjectKind() == clang::Decl::FOK_None;
+                            });
+        if (!hasNamespaceScopeRedeclaration)
+            fn->setHiddenFriend(true);
+    }
 }
 
 bool ClangVisitor::parseProperty(const QString &spelling, const Location &loc)
@@ -1440,7 +2148,7 @@ Node *ClangVisitor::nodeForCommentAtLocation(CXSourceLocation loc, CXSourceLocat
     }
     auto *node = findNodeForCursor(qdb_, *decl_it);
     // borrow the parameter name from the definition
-    if (node && node->isFunction(Node::CPP))
+    if (node && node->isFunction(Genus::CPP))
         readParameterNamesAndAttributes(static_cast<FunctionNode *>(node), *decl_it);
     return node;
 }
@@ -1457,20 +2165,11 @@ ClangCodeParser::ClangCodeParser(
     m_pch{pch}
 {
     m_allHeaders = config.getHeaderFiles();
+    m_internalFilePatterns = config.getInternalFilePatternsCompiled();
 }
 
 static const char *defaultArgs_[] = {
-/*
-  https://bugreports.qt.io/browse/QTBUG-94365
-  An unidentified bug in Clang 15.x causes parsing failures due to errors in
-  the AST. This replicates only with C++20 support enabled - avoid the issue
-  by using C++17 with Clang 15.
- */
-#if LIBCLANG_VERSION_MAJOR == 15
-    "-std=c++17",
-#else
     "-std=c++20",
-#endif
 #ifndef Q_OS_WIN
     "-fPIC",
 #else
@@ -1488,59 +2187,47 @@ static const char *defaultArgs_[] = {
     "-Wno-nullability-completeness",
     "-fvisibility=default",
     "-ferror-limit=0",
-    ("-I" CLANG_RESOURCE_DIR)
+    "-xc++"
 };
+
+static std::vector<const char *> toConstCharPointers(const std::vector<QByteArray> &args)
+{
+    std::vector<const char *> pointers;
+    pointers.reserve(args.size());
+    for (const auto &arg : args)
+        pointers.push_back(arg.constData());
+    return pointers;
+}
 
 /*!
   Load the default arguments and the defines into \a args.
   Clear \a args first.
  */
-void getDefaultArgs(const QList<QByteArray>& defines, std::vector<const char*>& args)
+void getDefaultArgs(const QList<QByteArray>& defines, std::vector<QByteArray>& args)
 {
     args.clear();
-    args.insert(args.begin(), std::begin(defaultArgs_), std::end(defaultArgs_));
+    for (const char *arg : defaultArgs_)
+        args.emplace_back(arg);
 
     // Add the defines from the qdocconf file.
     for (const auto &p : std::as_const(defines))
-        args.push_back(p.constData());
-}
-
-static QList<QByteArray> includePathsFromHeaders(const std::set<Config::HeaderFilePath> &allHeaders)
-{
-    QList<QByteArray> result;
-    for (const auto& [header_path, _] : allHeaders) {
-        const QByteArray path = "-I" + header_path.toLatin1();
-        const QByteArray parent =
-                "-I" + QDir::cleanPath(header_path + QLatin1String("/../")).toLatin1();
-    }
-
-    return result;
+        args.push_back(p);
 }
 
 /*!
-  Load the include paths into \a moreArgs. If no include paths
-  were provided, try to guess reasonable include paths.
+  Load the include paths into \a args.
  */
 void getMoreArgs(
     const std::vector<QByteArray>& include_paths,
-    const std::set<Config::HeaderFilePath>& all_headers,
-    std::vector<const char*>& args
+    std::vector<QByteArray>& args
 ) {
     if (include_paths.empty()) {
-        /*
-          The include paths provided are inadequate. Make a list
-          of reasonable places to look for include files and use
-          that list instead.
-         */
-        qCWarning(lcQdoc) << "No include paths passed to qdoc; guessing reasonable include paths";
-
-        QString basicIncludeDir = QDir::cleanPath(QString(Config::installDir + "/../include"));
-        args.emplace_back(QByteArray("-I" + basicIncludeDir.toLatin1()).constData());
-
-        auto include_paths_from_headers = includePathsFromHeaders(all_headers);
-        args.insert(args.end(), include_paths_from_headers.begin(), include_paths_from_headers.end());
+        qCWarning(lcQdoc) << "No include paths provided."
+                          << "Set 'includepaths' in the qdocconf file"
+                          << "or pass -I flags on the command line."
+                          << "C++ parsing may produce incomplete results.";
     } else {
-        std::copy(include_paths.begin(), include_paths.end(), std::back_inserter(args));
+        args.insert(args.end(), include_paths.begin(), include_paths.end());
     }
 }
 
@@ -1554,14 +2241,15 @@ std::optional<PCHFile> buildPCH(
     QString module_header,
     const std::set<Config::HeaderFilePath>& all_headers,
     const std::vector<QByteArray>& include_paths,
-    const QList<QByteArray>& defines
+    const QList<QByteArray>& defines,
+    const InclusionPolicy& policy
 ) {
-    static std::vector<const char*> arguments{};
+    static std::vector<QByteArray> arguments{};
 
     if (module_header.isEmpty()) return std::nullopt;
 
     getDefaultArgs(defines, arguments);
-    getMoreArgs(include_paths, all_headers, arguments);
+    getMoreArgs(include_paths, arguments);
 
     flags_ = static_cast<CXTranslationUnit_Flags>(CXTranslationUnit_Incomplete
                                                   | CXTranslationUnit_SkipFunctionBodies
@@ -1610,7 +2298,7 @@ std::optional<PCHFile> buildPCH(
         it = std::find_if(include_paths.begin(), include_paths.end(),
                             FindPredicate(candidate, module, FindPredicate::Any));
     if (it != include_paths.end())
-        header = candidate;
+        header = std::move(candidate);
 
     if (header.isEmpty()) {
         qWarning() << "(qdoc) Could not find the module header in include paths for module"
@@ -1627,12 +2315,14 @@ std::optional<PCHFile> buildPCH(
         QTextStream out(&tmpHeaderFile);
         if (header.isEmpty()) {
             for (const auto& [header_path, header_name] : all_headers) {
-                if (!header_name.endsWith(QLatin1String("_p.h"))
-                    && !header_name.startsWith(QLatin1String("moc_"))) {
-                    QString line = QLatin1String("#include \"") + header_path
-                            + QLatin1String("/") + header_name + QLatin1String("\"");
-                    out << line << "\n";
+                bool shouldInclude = !header_name.startsWith("moc_"_L1);
 
+                // Conditionally include private headers based on showInternal setting
+                if (header_name.endsWith("_p.h"_L1))
+                    shouldInclude = shouldInclude && policy.showInternal;
+
+                if (shouldInclude) {
+                    out << "#include \"" << header_path << "/" << header_name << "\"\n";
                 }
             }
         } else {
@@ -1641,13 +2331,24 @@ std::optional<PCHFile> buildPCH(
                 qWarning() << "Could not find module header file" << header;
                 return std::nullopt;
             }
-            out << QLatin1String("#include \"") + header + QLatin1String("\"");
+
+            out << "#include \"" << header << "\"\n";
+
+            if (policy.showInternal) {
+                for (const auto& [header_path, header_name] : all_headers) {
+                    bool shouldInclude = !header_name.startsWith("moc_"_L1);
+                    if (header_name.endsWith("_p.h"_L1) && shouldInclude)
+                        out << "#include \"" << header_path << "/" << header_name << "\"\n";
+                }
+            }
         }
     }
 
+    const auto argPointers = toConstCharPointers(arguments);
+    const QByteArray tmpHeaderLocal = tmpHeader.toLatin1();
     CXErrorCode err =
-            clang_parseTranslationUnit2(index, tmpHeader.toLatin1().data(), arguments.data(),
-                                        static_cast<int>(arguments.size()), nullptr, 0,
+            clang_parseTranslationUnit2(index, tmpHeaderLocal.constData(), argPointers.data(),
+                                        static_cast<int>(argPointers.size()), nullptr, 0,
                                         flags_ | CXTranslationUnit_ForSerialization, &tu.tu);
     qCDebug(lcQdoc) << __FUNCTION__ << "clang_parseTranslationUnit2(" << tmpHeader << arguments
                     << ") returns" << err;
@@ -1670,11 +2371,12 @@ std::optional<PCHFile> buildPCH(
     // Visit the header now, as token from pre-compiled header won't be visited
     // later
     CXCursor cur = clang_getTranslationUnitCursor(tu);
-    ClangVisitor visitor(qdb, all_headers);
+    auto &config = Config::instance();
+    ClangVisitor visitor(qdb, all_headers, config.getInternalFilePatternsCompiled());
     visitor.visitChildren(cur);
     qCDebug(lcQdoc) << "PCH built and visited for" << module_header;
 
-    return std::make_optional(PCHFile{std::move(pch_directory), pch_name});
+    return std::make_optional(PCHFile{std::move(pch_directory), std::move(pch_name)});
 }
 
 static float getUnpatchedVersion(QString t)
@@ -1689,7 +2391,9 @@ static float getUnpatchedVersion(QString t)
   and add its parsed contents to the database. \a location is
   used for reporting errors.
 
-  Call matchDocsAndStuff() to do all the parsing and tree building.
+  If parsing C++ header file as source, do not use the precompiled
+  header as the source file itself is likely already included in the
+  PCH and therefore interferes visiting the TU's children.
  */
 ParsedCppFileIR ClangCodeParser::parse_cpp_file(const QString &filePath)
 {
@@ -1700,17 +2404,20 @@ ParsedCppFileIR ClangCodeParser::parse_cpp_file(const QString &filePath)
     CompilationIndex index{ clang_createIndex(1, kClangDontDisplayDiagnostics) };
 
     getDefaultArgs(m_defines, m_args);
-    if (m_pch && !filePath.endsWith(".mm")) {
+    if (m_pch && !filePath.endsWith(".mm")
+            && !std::holds_alternative<CppHeaderSourceFile>(tag_source_file(filePath).second)) {
         m_args.push_back("-w");
         m_args.push_back("-include-pch");
-        m_args.push_back((*m_pch).get().name.constData());
+        m_args.push_back((*m_pch).get().name);
     }
-    getMoreArgs(m_includePaths, m_allHeaders, m_args);
+    getMoreArgs(m_includePaths, m_args);
 
     TranslationUnit tu;
+    const auto argPointers = toConstCharPointers(m_args);
+    const QByteArray filePathLocal = filePath.toLocal8Bit();
     CXErrorCode err =
-            clang_parseTranslationUnit2(index, filePath.toLocal8Bit(), m_args.data(),
-                                        static_cast<int>(m_args.size()), nullptr, 0, flags_, &tu.tu);
+            clang_parseTranslationUnit2(index, filePathLocal.constData(), argPointers.data(),
+                                        static_cast<int>(argPointers.size()), nullptr, 0, flags_, &tu.tu);
     qCDebug(lcQdoc) << __FUNCTION__ << "clang_parseTranslationUnit2(" << filePath << m_args
                     << ") returns" << err;
     printDiagnostics(tu);
@@ -1723,7 +2430,7 @@ ParsedCppFileIR ClangCodeParser::parse_cpp_file(const QString &filePath)
     ParsedCppFileIR parse_result{};
 
     CXCursor tuCur = clang_getTranslationUnitCursor(tu);
-    ClangVisitor visitor(m_qdb, m_allHeaders);
+    ClangVisitor visitor(m_qdb, m_allHeaders, m_internalFilePatterns);
     visitor.visitChildren(tuCur);
 
     CXToken *tokens;
@@ -1765,7 +2472,7 @@ ParsedCppFileIR ClangCodeParser::parse_cpp_file(const QString &filePath)
                 bool future = false;
                 if (doc.metaCommandsUsed().contains(COMMAND_SINCE)) {
                     QString sinceVersion = doc.metaCommandArgs(COMMAND_SINCE).at(0).first;
-                    if (getUnpatchedVersion(sinceVersion) >
+                    if (getUnpatchedVersion(std::move(sinceVersion)) >
                         getUnpatchedVersion(Config::instance().get(CONFIG_VERSION).asString()))
                         future = true;
                 }
@@ -1774,8 +2481,9 @@ ParsedCppFileIR ClangCodeParser::parse_cpp_file(const QString &filePath)
                             QStringLiteral("Cannot tie this documentation to anything"),
                             QStringLiteral("qdoc found a /*! ... */ comment, but there was no "
                                            "topic command (e.g., '\\%1', '\\%2') in the "
-                                           "comment and no function definition following "
-                                           "the comment.")
+                                           "comment and qdoc could not associate the "
+                                           "declaration or definition following the "
+                                           "comment with a documented entity.")
                                     .arg(COMMAND_FN, COMMAND_PAGE));
                 }
             }
@@ -1874,7 +2582,7 @@ std::variant<Node*, FnMatchError> FnCommandParser::operator()(const Location &lo
     if (m_pch) {
         m_args.push_back("-w");
         m_args.push_back("-include-pch");
-        m_args.push_back((*m_pch).get().name.constData());
+        m_args.push_back((*m_pch).get().name);
     }
 
     TranslationUnit tu;
@@ -1889,8 +2597,9 @@ std::variant<Node*, FnMatchError> FnCommandParser::operator()(const Location &lo
     const char *dummyFileName = fnDummyFileName;
     CXUnsavedFile unsavedFile { dummyFileName, s_fn.constData(),
                                 static_cast<unsigned long>(s_fn.size()) };
-    CXErrorCode err = clang_parseTranslationUnit2(index, dummyFileName, m_args.data(),
-                                                  int(m_args.size()), &unsavedFile, 1, flags, &tu.tu);
+    const auto argPointers = toConstCharPointers(m_args);
+    CXErrorCode err = clang_parseTranslationUnit2(index, dummyFileName, argPointers.data(),
+                                                  int(argPointers.size()), &unsavedFile, 1, flags, &tu.tu);
     qCDebug(lcQdoc) << __FUNCTION__ << "clang_parseTranslationUnit2(" << dummyFileName << m_args
                     << ") returns" << err;
     printDiagnostics(tu);
@@ -1905,7 +2614,8 @@ std::variant<Node*, FnMatchError> FnCommandParser::operator()(const Location &lo
           the diagnostics if they stop us finding the node.
          */
         CXCursor cur = clang_getTranslationUnitCursor(tu);
-        ClangVisitor visitor(m_qdb, m_allHeaders);
+        auto &config = Config::instance();
+        ClangVisitor visitor(m_qdb, m_allHeaders, config.getInternalFilePatternsCompiled());
         bool ignoreSignature = false;
         visitor.visitFnArg(cur, &fnNode, ignoreSignature);
 

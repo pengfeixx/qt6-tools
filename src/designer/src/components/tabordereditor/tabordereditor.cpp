@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #include "tabordereditor.h"
 
@@ -97,7 +98,7 @@ void TabOrderEditor::showEvent(QShowEvent *e)
 QRect TabOrderEditor::indicatorRect(int index) const
 {
     if (index < 0 || index >= m_tab_order_list.size())
-        return QRect();
+        return {};
 
     const QWidget *w = m_tab_order_list.at(index);
     const QString text = QString::number(index + 1);
@@ -316,7 +317,7 @@ void TabOrderEditor::mousePressEvent(QMouseEvent *e)
     if (m_current_index == m_tab_order_list.size())
         m_current_index = 0;
 
-    TabOrderCommand *cmd = new TabOrderCommand(formWindow());
+    auto *cmd = new TabOrderCommand(formWindow());
     cmd->init(m_tab_order_list);
     formWindow()->commandHistory()->push(cmd);
 }
@@ -387,7 +388,7 @@ void TabOrderEditor::showTabOrderDialog()
         return;
 
     m_tab_order_list = newOrder;
-    TabOrderCommand *cmd = new TabOrderCommand(formWindow());
+    auto *cmd = new TabOrderCommand(formWindow());
     cmd->init(m_tab_order_list);
     formWindow()->commandHistory()->push(cmd);
     update();

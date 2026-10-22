@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #include "qdesigner_introspection_p.h"
 
@@ -38,15 +39,15 @@ namespace  {
         bool isFlag() const override                        { return m_enum.isFlag(); }
         QString key(int index) const override               { return charToQString(m_enum.key(index)); }
         int keyCount() const override                       { return m_enum.keyCount(); }
-        int keyToValue(const QString &key) const override   { return m_enum.keyToValue(key.toUtf8()); }
-        int keysToValue(const QString &keys) const override { return m_enum.keysToValue(keys.toUtf8()); }
+        int keyToValue(const QString &key) const override;
+        int keysToValue(const QString &keys) const override;
         QString name() const override                       { return m_name; }
         QString enumName() const override                   { return charToQString(m_enum.enumName()); }
         QString scope() const override                      { return m_scope; }
         QString separator() const override;
         int value(int index) const override                 { return m_enum.value(index); }
-        QString valueToKey(int value) const override        { return charToQString(m_enum.valueToKey(value)); }
-        QString valueToKeys(int value) const override       { return charToQString(m_enum.valueToKeys(value)); }
+        QString valueToKey(int value) const override;
+        QString valueToKeys(int value) const override;
 
     private:
         const QMetaEnum m_enum;
@@ -64,6 +65,26 @@ namespace  {
     QString QDesignerMetaEnum::separator() const
     {
         return u"::"_s;
+    }
+
+    int QDesignerMetaEnum::keyToValue(const QString &key) const
+    {
+        return m_enum.keyToValue(key.toUtf8().constData());
+    }
+
+    int QDesignerMetaEnum::keysToValue(const QString &keys) const
+    {
+        return m_enum.keysToValue(keys.toUtf8().constData());
+    }
+
+    QString QDesignerMetaEnum::valueToKey(int value) const
+    {
+        return charToQString(m_enum.valueToKey(value));
+    }
+
+    QString QDesignerMetaEnum::valueToKeys(int value) const
+    {
+        return QString::fromUtf8(m_enum.valueToKeys(value));
     }
 
     // ------- QDesignerMetaProperty
@@ -221,15 +242,15 @@ namespace  {
         int enumeratorOffset() const override { return m_metaObject->enumeratorOffset(); }
 
         int indexOfEnumerator(const QString &name) const override
-        { return m_metaObject->indexOfEnumerator(name.toUtf8()); }
+        { return m_metaObject->indexOfEnumerator(name.toUtf8().constData()); }
         int indexOfMethod(const QString &method) const override
-        { return m_metaObject->indexOfMethod(method.toUtf8()); }
+        { return m_metaObject->indexOfMethod(method.toUtf8().constData()); }
         int indexOfProperty(const QString &name) const override
-        { return m_metaObject->indexOfProperty(name.toUtf8()); }
+        { return m_metaObject->indexOfProperty(name.toUtf8().constData()); }
         int indexOfSignal(const QString &signal) const override
-        { return m_metaObject->indexOfSignal(signal.toUtf8());  }
+        { return m_metaObject->indexOfSignal(signal.toUtf8().constData());  }
         int indexOfSlot(const QString &slot) const override
-        { return m_metaObject->indexOfSlot(slot.toUtf8()); }
+        { return m_metaObject->indexOfSlot(slot.toUtf8().constData()); }
 
         const QDesignerMetaMethodInterface *method(int index) const override
         { return m_methods[index]; }

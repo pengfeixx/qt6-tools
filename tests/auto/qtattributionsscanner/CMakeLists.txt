@@ -17,5 +17,6 @@ qt_internal_add_test(tst_qtattributionsscanner
 )
 
 target_compile_definitions(tst_qtattributionsscanner
-    PRIVATE QTTOOLS_LICENSES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../../LICENSES"
+    PRIVATE
+        QTTOOLS_LICENSES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../../LICENSES"
 )

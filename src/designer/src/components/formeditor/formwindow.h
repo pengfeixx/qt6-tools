@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #ifndef FORMWINDOW_H
 #define FORMWINDOW_H
@@ -123,9 +124,9 @@ public:
     void raiseChildSelections(QWidget *w);
     void raiseSelection(QWidget *w);
 
-    inline const QWidgetList& widgets() const { return m_widgets; }
-    inline int widgetCount() const { return m_widgets.size(); }
-    inline QWidget *widgetAt(int index) const { return m_widgets.at(index); }
+    const QWidgetList& widgets() const { return m_widgets; }
+    int widgetCount() const { return m_widgets.size(); }
+    QWidget *widgetAt(int index) const { return m_widgets.at(index); }
 
     QWidgetList widgets(QWidget *widget) const;
 

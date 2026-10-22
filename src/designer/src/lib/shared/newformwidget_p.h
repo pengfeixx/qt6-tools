@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #ifndef NEWFORMWIDGET_H
 #define NEWFORMWIDGET_H
@@ -26,8 +27,9 @@
 
 #include <QtCore/qlist.h>
 #include <QtCore/qmap.h>
-#include <QtCore/qpair.h>
 #include <QtCore/qstringlist.h>
+
+#include <utility>
 
 QT_BEGIN_NAMESPACE
 
@@ -44,6 +46,7 @@ class QDESIGNER_SHARED_EXPORT NewFormWidget : public QDesignerNewFormWidgetInter
 {
     Q_OBJECT
     Q_DISABLE_COPY_MOVE(NewFormWidget)
+    Q_PROPERTY(bool embeddedGroupBoxVisible READ isEmbeddedGroupBoxVisible WRITE setEmbeddedGroupBoxVisible)
 
 public:
     using DeviceProfileList = QList<qdesigner_internal::DeviceProfile>;
@@ -53,6 +56,9 @@ public:
 
     bool hasCurrentTemplate() const override;
     QString currentTemplate(QString *errorMessage = nullptr) override;
+
+    bool isEmbeddedGroupBoxVisible() const;
+    void setEmbeddedGroupBoxVisible(bool v);
 
     // Convenience for implementing file dialogs with preview
     static QImage grabForm(QDesignerFormEditorInterface *core,

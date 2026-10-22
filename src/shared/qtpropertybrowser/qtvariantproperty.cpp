@@ -1,19 +1,17 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "qtvariantproperty_p.h"
 #include "qtpropertymanager_p.h"
 #include "qteditorfactory_p.h"
 
-#include <QtCore/QVariant>
-#include <QtCore/QDate>
-#include <QtCore/QHash>
-#include <QtCore/QLocale>
-#include <QtCore/QRegularExpression>
-
-#if defined(Q_CC_MSVC)
-#    pragma warning(disable: 4786) /* MS VS 6: truncating debug info after 255 characters */
-#endif
+#include <QtCore/qdatetime.h>
+#include <QtCore/qhash.h>
+#include <QtCore/qlocale.h>
+#include <QtCore/qmap.h>
+#include <QtCore/qregularexpression.h>
+#include <QtCore/qvariant.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -165,9 +163,7 @@ QtVariantProperty::QtVariantProperty(QtVariantPropertyManager *manager)
 
     \sa QtProperty::~QtProperty()
 */
-QtVariantProperty::~QtVariantProperty()
-{
-}
+QtVariantProperty::~QtVariantProperty() = default;
 
 /*!
     Returns the property's current value.
@@ -300,7 +296,7 @@ public:
 
     void valueChanged(QtProperty *property, const QVariant &val);
 
-    int internalPropertyToType(QtProperty *property) const;
+    static int internalPropertyToType(QtProperty *property);
     QtVariantProperty *createSubProperty(QtVariantProperty *parent, QtVariantProperty *after,
             QtProperty *internal);
     void removeSubProperty(QtVariantProperty *property);
@@ -339,7 +335,7 @@ QtVariantPropertyManagerPrivate::QtVariantPropertyManagerPrivate() :
 {
 }
 
-int QtVariantPropertyManagerPrivate::internalPropertyToType(QtProperty *property) const
+int QtVariantPropertyManagerPrivate::internalPropertyToType(QtProperty *property)
 {
     int type = 0;
     QtAbstractPropertyManager *internPropertyManager = property->propertyManager();
@@ -359,7 +355,7 @@ QtVariantProperty *QtVariantPropertyManagerPrivate::createSubProperty(QtVariantP
 {
     int type = internalPropertyToType(internal);
     if (!type)
-        return 0;
+        return nullptr;
 
     bool wasCreatingSubProperties = m_creatingSubProperties;
     m_creatingSubProperties = true;
@@ -1288,7 +1284,7 @@ QtVariantProperty *QtVariantPropertyManager::variantProperty(const QtProperty *p
 {
     const auto it = d_ptr->m_propertyToType.constFind(property);
     if (it == d_ptr->m_propertyToType.constEnd())
-        return 0;
+        return nullptr;
     return it.value().first;
 }
 
@@ -1300,9 +1296,7 @@ QtVariantProperty *QtVariantPropertyManager::variantProperty(const QtProperty *p
 */
 bool QtVariantPropertyManager::isPropertyTypeSupported(int propertyType) const
 {
-    if (d_ptr->m_typeToValueType.contains(propertyType))
-        return true;
-    return false;
+    return d_ptr->m_typeToValueType.contains(propertyType);
 }
 
 /*!
@@ -1322,7 +1316,7 @@ bool QtVariantPropertyManager::isPropertyTypeSupported(int propertyType) const
 QtVariantProperty *QtVariantPropertyManager::addProperty(int propertyType, const QString &name)
 {
     if (!isPropertyTypeSupported(propertyType))
-        return 0;
+        return nullptr;
 
     bool wasCreating = d_ptr->m_creatingProperty;
     d_ptr->m_creatingProperty = true;
@@ -1332,7 +1326,7 @@ QtVariantProperty *QtVariantPropertyManager::addProperty(int propertyType, const
     d_ptr->m_propertyType = 0;
 
     if (!property)
-        return 0;
+        return nullptr;
 
     return variantProperty(property);
 }
@@ -1421,9 +1415,7 @@ int QtVariantPropertyManager::valueType(const QtProperty *property) const
 */
 int QtVariantPropertyManager::valueType(int propertyType) const
 {
-    if (d_ptr->m_typeToValueType.contains(propertyType))
-        return d_ptr->m_typeToValueType[propertyType];
-    return 0;
+    return d_ptr->m_typeToValueType.value(propertyType, 0);
 }
 
 /*!
@@ -1865,7 +1857,7 @@ void QtVariantPropertyManager::uninitializeProperty(QtProperty *property)
 QtProperty *QtVariantPropertyManager::createProperty()
 {
     if (!d_ptr->m_creatingProperty)
-        return 0;
+        return nullptr;
 
     auto *property = new QtVariantProperty(this);
     d_ptr->m_propertyToType.insert(property, {property, d_ptr->m_propertyType});
@@ -2024,9 +2016,7 @@ QtVariantEditorFactory::QtVariantEditorFactory(QObject *parent)
 /*!
     Destroys this factory, and all the widgets it has created.
 */
-QtVariantEditorFactory::~QtVariantEditorFactory()
-{
-}
+QtVariantEditorFactory::~QtVariantEditorFactory() = default;
 
 /*!
     \internal
@@ -2143,7 +2133,7 @@ QWidget *QtVariantEditorFactory::createEditor(QtVariantPropertyManager *manager,
     const int propType = manager->propertyType(property);
     QtAbstractEditorFactoryBase *factory = d_ptr->m_typeToFactory.value(propType, nullptr);
     if (!factory)
-        return 0;
+        return nullptr;
     return factory->createEditor(wrappedProperty(property), parent);
 }
 

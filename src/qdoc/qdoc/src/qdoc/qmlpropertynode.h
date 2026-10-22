@@ -5,6 +5,7 @@
 #define QMLPROPERTYNODE_H
 
 #include "aggregate.h"
+#include "nativeenum.h"
 #include "node.h"
 
 #include <QtCore/qglobal.h>
@@ -12,25 +13,28 @@
 
 QT_BEGIN_NAMESPACE
 
-class QmlPropertyNode : public Node
+class QmlPropertyNode : public Node, public NativeEnumInterface
 {
 public:
     QmlPropertyNode(Aggregate *parent, const QString &name, QString type, bool attached);
 
-    void setDataType(const QString &dataType) override { m_type = dataType; }
+    void setDataType(const QString &dataType) override;
     void setStored(bool stored) { m_stored = toFlagValue(stored); }
     void setDefaultValue(const QString &value) { m_defaultValue = value; }
     void setRequired() { m_required = toFlagValue(true); }
-    bool setEnumNode(const QString &path, const QString &registeredQmlName);
+    void setIsList(bool isList);
 
     [[nodiscard]] const QString &dataType() const { return m_type; }
+    [[nodiscard]] bool validateDataType(const QString &type = QString()) const;
     [[nodiscard]] const QString &defaultValue() const { return m_defaultValue; }
     [[nodiscard]] bool isStored() const { return fromFlagValue(m_stored, true); }
-    bool isRequired();
+    [[nodiscard]] bool isRequired() const;
+    [[nodiscard]] bool isRequired();
     [[nodiscard]] bool isDefault() const override { return m_isDefault; }
-    [[nodiscard]] bool isReadOnly() const { return fromFlagValue(m_readOnly, false); }
+    [[nodiscard]] bool isReadOnly() const;
     [[nodiscard]] bool isReadOnly();
     [[nodiscard]] bool isAlias() const override { return m_isAlias; }
+    [[nodiscard]] QStringList hints() const;
     [[nodiscard]] bool isAttached() const override { return m_attached; }
     [[nodiscard]] QString qmlTypeName() const override { return parent()->qmlTypeName(); }
     [[nodiscard]] QString logicalModuleName() const override
@@ -46,11 +50,12 @@ public:
         return parent()->logicalModuleIdentifier();
     }
     [[nodiscard]] QString element() const override { return parent()->name(); }
-    [[nodiscard]] const EnumNode *enumNode() const { return m_enumNode.first; }
-    [[nodiscard]] const QString &enumPrefix() const;
+    NativeEnum *nativeEnum() override { return &m_nativeEnum; }
+    const NativeEnum *nativeEnum() const override { return &m_nativeEnum; }
 
     void markDefault() override { m_isDefault = true; }
     void markReadOnly(bool flag) override { m_readOnly = toFlagValue(flag); }
+    void markRequired(bool flag) { m_required = toFlagValue(flag); }
 
 private:
     PropertyNode *findCorrespondingCppProperty();
@@ -62,9 +67,13 @@ private:
     bool m_isAlias { false };
     bool m_isDefault { false };
     bool m_attached {};
+    FlagValue m_isList { FlagValueDefault };
     FlagValue m_readOnly { FlagValueDefault };
     FlagValue m_required { FlagValueDefault };
-    std::pair<EnumNode *, QString> m_enumNode { nullptr, {} };
+    NativeEnum m_nativeEnum;
+    static QSet<QString> cppQmlValueTypes;
+    static QRegularExpression cppBasicList;
+    static QRegularExpression qmlBasicList;
 };
 
 QT_END_NAMESPACE

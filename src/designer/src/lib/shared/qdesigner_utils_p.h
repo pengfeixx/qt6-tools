@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 //
 //  W A R N I N G
@@ -20,6 +21,7 @@
 #include <QtDesigner/abstractformwindow.h>
 
 #include <QtCore/qcompare.h>
+#include <QtCore/qmap.h>
 #include <QtCore/qhash.h>
 #include <QtCore/qvariant.h>
 #include <QtCore/qshareddata.h>
@@ -537,9 +539,8 @@ inline bool isCentralWidget(QDesignerFormWindowInterface *fw, QWidget *widget)
         return true;
 
     // ### generalize for other containers
-    if (QMainWindow *mw = qobject_cast<QMainWindow*>(fw->mainContainer())) {
+    if (auto *mw = qobject_cast<QMainWindow*>(fw->mainContainer()))
         return mw->centralWidget() == widget;
-    }
 
     return false;
 }

@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #include "qdesigner_workbench.h"
 #include "qdesigner.h"
@@ -142,8 +143,8 @@ static inline QMenu *addMenu(QMenuBar *mb, const QString &title, const ActionLis
 
 // -------- QDesignerWorkbench
 
-QDesignerWorkbench::QDesignerWorkbench(const QStringList &pluginPaths)  :
-    m_core(QDesignerComponents::createFormEditorWithPluginPaths(pluginPaths, this)),
+QDesignerWorkbench::QDesignerWorkbench(const Options &options)  :
+    m_core(QDesignerComponents::createFormEditorWithPluginPaths(options.pluginPaths, this)),
     m_windowActions(new QActionGroup(this)),
     m_globalMenuBar(new QMenuBar)
 {
@@ -153,7 +154,7 @@ QDesignerWorkbench::QDesignerWorkbench(const QStringList &pluginPaths)  :
 
     initializeCorePlugins();
     QDesignerComponents::initializePlugins(core());
-    m_actionManager = new QDesignerActions(this); // accesses plugin components
+    m_actionManager = new QDesignerActions(options, this); // accesses plugin components
 
     m_windowActions->setExclusive(true);
     connect(m_windowActions, &QActionGroup::triggered,
@@ -212,7 +213,7 @@ QDesignerWorkbench::QDesignerWorkbench(const QStringList &pluginPaths)  :
 
 
     { // Add application specific options pages
-        QDesignerAppearanceOptionsPage *appearanceOptions = new QDesignerAppearanceOptionsPage(m_core);
+        auto *appearanceOptions = new QDesignerAppearanceOptionsPage(m_core);
         connect(appearanceOptions, &QDesignerAppearanceOptionsPage::settingsChanged, this, &QDesignerWorkbench::notifyUISettingsChanged);
         auto optionsPages = m_core->optionsPages();
         optionsPages.push_front(appearanceOptions);
@@ -786,7 +787,7 @@ void QDesignerWorkbench::closeAllToolWindows()
 
 bool QDesignerWorkbench::readInBackup()
 {
-    const QMap<QString, QString> backupFileMap = QDesignerSettings(m_core).backup();
+    const QMap<QString, QString> backupFileMap = m_actionManager->pendingBackups();
     if (backupFileMap.isEmpty())
         return false;
 
@@ -838,6 +839,22 @@ void QDesignerWorkbench::bringAllToFront()
         raiseWindow(tw);
     for (QDesignerFormWindow *dfw : std::as_const(m_formWindows))
         raiseWindow(dfw);
+}
+
+void QDesignerWorkbench::requestActivate()
+{
+    switch (m_mode) {
+    case NeutralMode:
+        break;
+    case TopLevelMode:
+        bringAllToFront();
+        widgetBoxToolWindow()->windowHandle()->requestActivate();
+        break;
+    case DockedMode:
+        raiseWindow(m_dockedMainWindow);
+        m_dockedMainWindow->windowHandle()->requestActivate();
+        break;
+    }
 }
 
 // Resize a form window taking MDI decorations into account
@@ -921,7 +938,7 @@ QDesignerFormWindow * QDesignerWorkbench::loadForm(const QString &fileName,
         return nullptr;
     }
 
-    if (qdesigner_internal::FormWindowBase *fwb = qobject_cast<qdesigner_internal::FormWindowBase *>(editor))
+    if (auto *fwb = qobject_cast<qdesigner_internal::FormWindowBase *>(editor))
         fwb->setLineTerminatorMode(mode);
 
     switch (m_mode) {
@@ -990,7 +1007,7 @@ void QDesignerWorkbench::toggleFormMinimizationState()
     QDesignerFormWindowInterface *fwi = core()->formWindowManager()->activeFormWindow();
     if (!fwi || m_mode == NeutralMode)
         return;
-    QDesignerFormWindow *fw = qobject_cast<QDesignerFormWindow *>(fwi->parentWidget());
+    auto *fw = qobject_cast<QDesignerFormWindow *>(fwi->parentWidget());
     Q_ASSERT(fw);
     setFormWindowMinimized(fw, !isFormWindowMinimized(fw));
 }

@@ -1,11 +1,12 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #ifndef PALETTEEDITOR_H
 #define PALETTEEDITOR_H
 
 #include "ui_paletteeditor.h"
-#include <QtWidgets/qitemdelegate.h>
+#include <QtWidgets/qstyleditemdelegate.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -156,7 +157,7 @@ private:
     bool m_edited = false;
 };
 
-class ColorDelegate : public QItemDelegate
+class ColorDelegate : public QStyledItemDelegate
 {
     Q_OBJECT
 

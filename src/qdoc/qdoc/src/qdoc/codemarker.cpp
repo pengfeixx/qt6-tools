@@ -6,10 +6,14 @@
 #include "classnode.h"
 #include "config.h"
 #include "functionnode.h"
-#include "node.h"
+#include "enumnode.h"
+#include "genustypes.h"
 #include "propertynode.h"
 #include "qmlpropertynode.h"
+#include "utilities.h"
+#include "textutils.h"
 
+#include <QtCore/qfileinfo.h>
 #include <QtCore/qobjectdefs.h>
 
 QT_BEGIN_NAMESPACE
@@ -89,6 +93,12 @@ CodeMarker *CodeMarker::markerForCode(const QString &code)
     return defaultMarker;
 }
 
+/*!
+    Returns the appropriate code marker for the content in the file with the
+    given \a fileName, which is typically the whole file path.
+    This is achieved by first checking the file extension, then checking the
+    file name.
+*/
 CodeMarker *CodeMarker::markerForFileName(const QString &fileName)
 {
     CodeMarker *defaultMarker = markerForLanguage(s_defaultLang);
@@ -103,31 +113,32 @@ CodeMarker *CodeMarker::markerForFileName(const QString &fileName)
         }
         --dot;
     }
+    // Fall back on checking the whole file name.
+    QString name = QFileInfo(fileName).fileName();
+    for (const auto &marker : std::as_const(s_markers)) {
+        if (marker->recognizeFileName(name))
+            return marker;
+    }
     return defaultMarker;
 }
 
 CodeMarker *CodeMarker::markerForLanguage(const QString &lang)
 {
     for (const auto &marker : std::as_const(s_markers)) {
-        if (marker->recognizeLanguage(lang))
+        if (marker->recognizeLanguage(lang.toLower()))
             return marker;
     }
     return nullptr;
 }
 
-const Node *CodeMarker::nodeForString(const QString &string)
+bool CodeMarker::recognizeFileName(const QString &name)
 {
-#if QT_POINTER_SIZE == 4
-    const quintptr n = string.toUInt();
-#else
-    const quintptr n = string.toULongLong();
-#endif
-    return reinterpret_cast<const Node *>(n);
+    return (name == "qmldir"_L1);
 }
 
-QString CodeMarker::stringForNode(const Node *node)
+bool CodeMarker::recognizeLanguage(const QString &language)
 {
-    return QString::number(reinterpret_cast<quintptr>(node));
+    return (language == "text"_L1);
 }
 
 /*!
@@ -136,7 +147,8 @@ QString CodeMarker::stringForNode(const Node *node)
 
     If a string is returned, it is one of:
     \list
-        \li \c {"preliminary"}
+        \li \c {"preliminary"} or the value of configuration option \c preliminary
+               (in lowercase)
         \li \c {"since <version_since>, deprecated in <version_deprecated>"}
         \li \c {"since <version_since>, until <version_deprecated>"}
         \li \c {"since <version_since>"}
@@ -151,7 +163,7 @@ QString CodeMarker::stringForNode(const Node *node)
 static std::optional<QString> nodeStatusAsString(const Node *node)
 {
     if (node->isPreliminary())
-        return std::optional(u"preliminary"_s);
+        return std::optional(Config::instance().get(CONFIG_PRELIMINARY).asString().toLower());
 
     QStringList result;
     if (const auto &since = node->since(); !since.isEmpty())
@@ -180,7 +192,17 @@ QString CodeMarker::extraSynopsis(const Node *node, Section::Style style)
     QStringList extra;
     if (style == Section::Details) {
         switch (node->nodeType()) {
-        case Node::Function: {
+        case NodeType::Enum:
+            if (static_cast<const EnumNode *>(node)->isAnonymous())
+                extra << "anonymous";
+            break;
+        case NodeType::Struct:
+        case NodeType::Union:
+        case NodeType::Class:
+            if (static_cast<const ClassNode *>(node)->isAnonymous())
+                extra << "anonymous";
+            break;
+        case NodeType::Function: {
             const auto *func = static_cast<const FunctionNode *>(node);
             if (func->isStatic()) {
                 extra << "static";
@@ -211,38 +233,42 @@ QString CodeMarker::extraSynopsis(const Node *node, Section::Style style)
                 extra << "signal";
             } else if (func->isSlot())
                 extra << "slot";
-            else if (func->isDefault())
-                extra << "default";
+            else if (func->isImplicitlyGenerated())
+                extra << "implicit";
+            else if (func->isExplicitlyDefaulted())
+                extra << "<@extref target=\"cpp-explicitly-defaulted\">default</@extref>";
+            else if (func->isDeletedAsWritten())
+                extra << "<@extref target=\"cpp-deleted-functions\">delete</@extref>";
             else if (func->isInvokable())
                 extra << "invokable";
+
+            if (func->isAttached())
+                extra << "attached";
         }
         break;
-        case Node::TypeAlias:
+        case NodeType::TypeAlias:
             extra << "alias";
             break;
-        case Node::Property: {
+        case NodeType::Property: {
             auto propertyNode = static_cast<const PropertyNode *>(node);
             if (propertyNode->propertyType() == PropertyNode::PropertyType::BindableProperty)
                 extra << "bindable";
             if (!propertyNode->isWritable())
                 extra << "read-only";
+            if (propertyNode->isAttached())
+                extra << "attached";
         }
         break;
-        case Node::QmlProperty: {
+        case NodeType::QmlProperty: {
             auto qmlProperty = static_cast<const QmlPropertyNode *>(node);
-            if (qmlProperty->isDefault())
-                extra << u"default"_s;
-            // Call non-const overloads to ensure attributes are fetched from
-            // associated C++ properties
-            else if (const_cast<QmlPropertyNode *>(qmlProperty)->isReadOnly())
-                extra << u"read-only"_s;
-            else if (const_cast<QmlPropertyNode *>(qmlProperty)->isRequired())
-                extra << u"required"_s;
-            else if (!qmlProperty->defaultValue().isEmpty()) {
+            extra << qmlProperty->hints();
+            // "default: value" not included in hints() to avoid "default default: value"
+            if (!qmlProperty->isDefault() && !qmlProperty->defaultValue().isEmpty())
                 extra << u"default: "_s + qmlProperty->defaultValue();
+            if (qmlProperty->isAttached())
+                extra << "attached";
         }
         break;
-        }
         default:
             break;
         }
@@ -264,36 +290,9 @@ QString CodeMarker::extraSynopsis(const Node *node, Section::Style style)
     return extraStr;
 }
 
-static const QString samp = QLatin1String("&amp;");
-static const QString slt = QLatin1String("&lt;");
-static const QString sgt = QLatin1String("&gt;");
-static const QString squot = QLatin1String("&quot;");
-
 QString CodeMarker::protect(const QString &str)
 {
-    qsizetype n = str.size();
-    QString marked;
-    marked.reserve(n * 2 + 30);
-    const QChar *data = str.constData();
-    for (int i = 0; i != n; ++i) {
-        switch (data[i].unicode()) {
-        case '&':
-            marked += samp;
-            break;
-        case '<':
-            marked += slt;
-            break;
-        case '>':
-            marked += sgt;
-            break;
-        case '"':
-            marked += squot;
-            break;
-        default:
-            marked += data[i];
-        }
-    }
-    return marked;
+    return TextUtils::protect(str);
 }
 
 void CodeMarker::appendProtectedString(QString *output, QStringView str)
@@ -304,16 +303,16 @@ void CodeMarker::appendProtectedString(QString *output, QStringView str)
     for (int i = 0; i != n; ++i) {
         switch (data[i].unicode()) {
         case '&':
-            *output += samp;
+            *output += TextUtils::samp;
             break;
         case '<':
-            *output += slt;
+            *output += TextUtils::slt;
             break;
         case '>':
-            *output += sgt;
+            *output += TextUtils::sgt;
             break;
         case '"':
-            *output += squot;
+            *output += TextUtils::squot;
             break;
         default:
             *output += data[i];
@@ -376,31 +375,31 @@ QString CodeMarker::taggedNode(const Node *node)
     const QString &name = node->name();
 
     switch (node->nodeType()) {
-    case Node::Namespace:
+    case NodeType::Namespace:
         tag = QLatin1String("@namespace");
         break;
-    case Node::Class:
-    case Node::Struct:
-    case Node::Union:
+    case NodeType::Class:
+    case NodeType::Struct:
+    case NodeType::Union:
         tag = QLatin1String("@class");
         break;
-    case Node::Enum:
+    case NodeType::Enum:
         tag = QLatin1String("@enum");
         break;
-    case Node::TypeAlias:
-    case Node::Typedef:
+    case NodeType::TypeAlias:
+    case NodeType::Typedef:
         tag = QLatin1String("@typedef");
         break;
-    case Node::Function:
+    case NodeType::Function:
         tag = QLatin1String("@function");
         break;
-    case Node::Property:
+    case NodeType::Property:
         tag = QLatin1String("@property");
         break;
-    case Node::QmlType:
+    case NodeType::QmlType:
         tag = QLatin1String("@property");
         break;
-    case Node::Page:
+    case NodeType::Page:
         tag = QLatin1String("@property");
         break;
     default:
@@ -417,13 +416,13 @@ QString CodeMarker::taggedQmlNode(const Node *node)
     if (node->isFunction()) {
         const auto *fn = static_cast<const FunctionNode *>(node);
         switch (fn->metaness()) {
-        case FunctionNode::QmlSignal:
+        case Metaness::QmlSignal:
             tag = QLatin1String("@signal");
             break;
-        case FunctionNode::QmlSignalHandler:
+        case Metaness::QmlSignalHandler:
             tag = QLatin1String("@signalhandler");
             break;
-        case FunctionNode::QmlMethod:
+        case Metaness::QmlMethod:
             tag = QLatin1String("@method");
             break;
         default:
@@ -441,7 +440,7 @@ QString CodeMarker::taggedQmlNode(const Node *node)
 
 QString CodeMarker::linkTag(const Node *node, const QString &body)
 {
-    return QLatin1String("<@link node=\"") + stringForNode(node) + QLatin1String("\">") + body
+    return QLatin1String("<@link node=\"") + Utilities::stringForNode(node) + QLatin1String("\">") + body
             + QLatin1String("</@link>");
 }
 

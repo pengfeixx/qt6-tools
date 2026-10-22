@@ -1,13 +1,15 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "qtcolorline_p.h"
 #include "qdrawutil.h"
 
-#include <QtGui/QPainter>
-#include <QtGui/QPaintEvent>
-#include <QtWidgets/QStyleOption>
-#include <QtGui/QRegion>
+#include <QtWidgets/qstyleoption.h>
+
+#include <QtGui/qevent.h>
+#include <QtGui/qpainter.h>
+#include <QtGui/qregion.h>
 
 QT_BEGIN_NAMESPACE
 

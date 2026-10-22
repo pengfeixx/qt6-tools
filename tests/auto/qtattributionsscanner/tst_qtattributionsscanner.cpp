@@ -11,6 +11,8 @@
 
 #include <QtTest/qtest.h>
 
+using namespace Qt::StringLiterals;
+
 class tst_qtattributionsscanner : public QObject
 {
     Q_OBJECT
@@ -59,12 +61,16 @@ void tst_qtattributionsscanner::test_data()
     QTest::newRow("variants") << QStringLiteral("good/variants/qt_attribution_test.json") << true
                               << QStringLiteral("good/variants/expected.json")
                               << QStringLiteral("good/variants/expected.error");
+    QTest::newRow("local_license") << QStringLiteral("good/local_license/qt_attribution_test.json") << true
+                              << QStringLiteral("good/local_license/expected.json")
+                              << QStringLiteral("good/local_license/expected.error");
 }
 
 void tst_qtattributionsscanner::readExpectedFile(const QString &baseDir, const QString &fileName, QByteArray *content)
 {
     QFile file(QDir(m_basePath).absoluteFilePath(fileName));
-    QVERIFY2(file.open(QIODevice::ReadOnly | QIODevice::Text), "Could not open " + file.fileName().toLocal8Bit());
+    QVERIFY2(file.open(QIODevice::ReadOnly | QIODevice::Text),
+             ("Could not open "_ba + file.fileName().toLocal8Bit()).constData());
     *content = file.readAll();
     content->replace("%{PWD}", baseDir.toUtf8());
 
@@ -95,10 +101,10 @@ void tst_qtattributionsscanner::test()
     QVERIFY2(proc.waitForFinished(30000), qPrintable(command));
 
     QVERIFY2(proc.exitStatus() == QProcess::NormalExit,
-             "\"qtattributionsscanner " + m_cmd.toLatin1() + "\" crashed");
+             ("\"qtattributionsscanner "_ba + m_cmd.toLatin1() + "\" crashed"_ba).constData());
     QVERIFY2(success ? (proc.exitCode() == 0) : (proc.exitCode() != 0),
-             "\"qtattributionsscanner " + m_cmd.toLatin1() + "\" exited with code "
-                     + QByteArray::number(proc.exitCode()));
+             ("\"qtattributionsscanner "_ba + m_cmd.toLatin1() + "\" exited with code "_ba
+              + QByteArray::number(proc.exitCode())).constData());
 
     { // compare error output
         QByteArray stdErr = proc.readAllStandardError();
@@ -116,7 +122,8 @@ void tst_qtattributionsscanner::test()
 
         QJsonParseError jsonError;
         QJsonDocument actualJson = QJsonDocument::fromJson(stdOut, &jsonError);
-        QVERIFY2(!actualJson.isNull(), "Invalid output: " + jsonError.errorString().toLatin1());
+        QVERIFY2(!actualJson.isNull(),
+                 ("Invalid output: "_ba + jsonError.errorString().toLatin1()).constData());
 
         QByteArray expectedOutput;
         readExpectedFile(dir, stdout_file, &expectedOutput);

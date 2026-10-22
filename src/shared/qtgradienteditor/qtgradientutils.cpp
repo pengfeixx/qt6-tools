@@ -1,13 +1,16 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #include "qtgradientutils_p.h"
 #include "qtgradientmanager_p.h"
-#include <QtGui/QLinearGradient>
-#include <QtGui/QRadialGradient>
-#include <QtGui/QConicalGradient>
-#include <QtXml/QDomDocument>
-#include <QtCore/QDebug>
+
+#include <QtGui/qbrush.h>
+#include <QtGui/qpainter.h>
+
+#include <QtXml/qdom.h>
+
+#include <QtCore/qdebug.h>
 
 QT_BEGIN_NAMESPACE
 

@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #include "actioneditor_p.h"
 #include "actionrepository_p.h"
@@ -208,7 +209,8 @@ ActionEditor::ActionEditor(QDesignerFormEditorInterface *core, QWidget *parent, 
     connect(m_actionView, &ActionView::resourceImageDropped,
             this, &ActionEditor::resourceImageDropped);
 
-    connect(m_actionView, &ActionView::currentChanged,this, &ActionEditor::slotCurrentItemChanged);
+    connect(m_actionView, &ActionView::currentActionChanged,
+            this, &ActionEditor::slotCurrentItemChanged);
     // make it possible for vs integration to reimplement edit action dialog
     connect(m_actionView, &ActionView::activated, this, &ActionEditor::itemActivated);
 

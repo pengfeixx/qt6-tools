@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 //
 //  W A R N I N G
@@ -29,8 +30,8 @@ class QtGroupPropertyManager : public QtAbstractPropertyManager
 {
     Q_OBJECT
 public:
-    QtGroupPropertyManager(QObject *parent = 0);
-    ~QtGroupPropertyManager();
+    QtGroupPropertyManager(QObject *parent = nullptr);
+    ~QtGroupPropertyManager() override;
 
 protected:
     bool hasValue(const QtProperty *property) const override;
@@ -45,8 +46,8 @@ class QtIntPropertyManager : public QtAbstractPropertyManager
 {
     Q_OBJECT
 public:
-    QtIntPropertyManager(QObject *parent = 0);
-    ~QtIntPropertyManager();
+    QtIntPropertyManager(QObject *parent = nullptr);
+    ~QtIntPropertyManager() override;
 
     int value(const QtProperty *property) const;
     int minimum(const QtProperty *property) const;
@@ -79,8 +80,8 @@ class QtBoolPropertyManager : public QtAbstractPropertyManager
 {
     Q_OBJECT
 public:
-    QtBoolPropertyManager(QObject *parent = 0);
-    ~QtBoolPropertyManager();
+    QtBoolPropertyManager(QObject *parent = nullptr);
+    ~QtBoolPropertyManager() override;
 
     bool value(const QtProperty *property) const;
 
@@ -105,8 +106,8 @@ class QtDoublePropertyManager : public QtAbstractPropertyManager
 {
     Q_OBJECT
 public:
-    QtDoublePropertyManager(QObject *parent = 0);
-    ~QtDoublePropertyManager();
+    QtDoublePropertyManager(QObject *parent = nullptr);
+    ~QtDoublePropertyManager() override;
 
     double value(const QtProperty *property) const;
     double minimum(const QtProperty *property) const;
@@ -142,8 +143,8 @@ class QtStringPropertyManager : public QtAbstractPropertyManager
 {
     Q_OBJECT
 public:
-    QtStringPropertyManager(QObject *parent = 0);
-    ~QtStringPropertyManager();
+    QtStringPropertyManager(QObject *parent = nullptr);
+    ~QtStringPropertyManager() override;
 
     QString value(const QtProperty *property) const;
     QRegularExpression regExp(const QtProperty *property) const;
@@ -170,8 +171,8 @@ class QtDatePropertyManager : public QtAbstractPropertyManager
 {
     Q_OBJECT
 public:
-    QtDatePropertyManager(QObject *parent = 0);
-    ~QtDatePropertyManager();
+    QtDatePropertyManager(QObject *parent = nullptr);
+    ~QtDatePropertyManager() override;
 
     QDate value(const QtProperty *property) const;
     QDate minimum(const QtProperty *property) const;
@@ -201,8 +202,8 @@ class QtTimePropertyManager : public QtAbstractPropertyManager
 {
     Q_OBJECT
 public:
-    QtTimePropertyManager(QObject *parent = 0);
-    ~QtTimePropertyManager();
+    QtTimePropertyManager(QObject *parent = nullptr);
+    ~QtTimePropertyManager() override;
 
     QTime value(const QtProperty *property) const;
 
@@ -226,8 +227,8 @@ class QtDateTimePropertyManager : public QtAbstractPropertyManager
 {
     Q_OBJECT
 public:
-    QtDateTimePropertyManager(QObject *parent = 0);
-    ~QtDateTimePropertyManager();
+    QtDateTimePropertyManager(QObject *parent = nullptr);
+    ~QtDateTimePropertyManager() override;
 
     QDateTime value(const QtProperty *property) const;
 
@@ -251,8 +252,8 @@ class QtKeySequencePropertyManager : public QtAbstractPropertyManager
 {
     Q_OBJECT
 public:
-    QtKeySequencePropertyManager(QObject *parent = 0);
-    ~QtKeySequencePropertyManager();
+    QtKeySequencePropertyManager(QObject *parent = nullptr);
+    ~QtKeySequencePropertyManager() override;
 
     QKeySequence value(const QtProperty *property) const;
 
@@ -276,8 +277,8 @@ class QtCharPropertyManager : public QtAbstractPropertyManager
 {
     Q_OBJECT
 public:
-    QtCharPropertyManager(QObject *parent = 0);
-    ~QtCharPropertyManager();
+    QtCharPropertyManager(QObject *parent = nullptr);
+    ~QtCharPropertyManager() override;
 
     QChar value(const QtProperty *property) const;
 
@@ -302,8 +303,8 @@ class QtLocalePropertyManager : public QtAbstractPropertyManager
 {
     Q_OBJECT
 public:
-    QtLocalePropertyManager(QObject *parent = 0);
-    ~QtLocalePropertyManager();
+    QtLocalePropertyManager(QObject *parent = nullptr);
+    ~QtLocalePropertyManager() override;
 
     QtEnumPropertyManager *subEnumPropertyManager() const;
 
@@ -329,8 +330,8 @@ class QtPointPropertyManager : public QtAbstractPropertyManager
 {
     Q_OBJECT
 public:
-    QtPointPropertyManager(QObject *parent = 0);
-    ~QtPointPropertyManager();
+    QtPointPropertyManager(QObject *parent = nullptr);
+    ~QtPointPropertyManager() override;
 
     QtIntPropertyManager *subIntPropertyManager() const;
 
@@ -356,8 +357,8 @@ class QtPointFPropertyManager : public QtAbstractPropertyManager
 {
     Q_OBJECT
 public:
-    QtPointFPropertyManager(QObject *parent = 0);
-    ~QtPointFPropertyManager();
+    QtPointFPropertyManager(QObject *parent = nullptr);
+    ~QtPointFPropertyManager() override;
 
     QtDoublePropertyManager *subDoublePropertyManager() const;
 
@@ -386,8 +387,8 @@ class QtSizePropertyManager : public QtAbstractPropertyManager
 {
     Q_OBJECT
 public:
-    QtSizePropertyManager(QObject *parent = 0);
-    ~QtSizePropertyManager();
+    QtSizePropertyManager(QObject *parent = nullptr);
+    ~QtSizePropertyManager() override;
 
     QtIntPropertyManager *subIntPropertyManager() const;
 
@@ -419,8 +420,8 @@ class QtSizeFPropertyManager : public QtAbstractPropertyManager
 {
     Q_OBJECT
 public:
-    QtSizeFPropertyManager(QObject *parent = 0);
-    ~QtSizeFPropertyManager();
+    QtSizeFPropertyManager(QObject *parent = nullptr);
+    ~QtSizeFPropertyManager() override;
 
     QtDoublePropertyManager *subDoublePropertyManager() const;
 
@@ -455,8 +456,8 @@ class QtRectPropertyManager : public QtAbstractPropertyManager
 {
     Q_OBJECT
 public:
-    QtRectPropertyManager(QObject *parent = 0);
-    ~QtRectPropertyManager();
+    QtRectPropertyManager(QObject *parent = nullptr);
+    ~QtRectPropertyManager() override;
 
     QtIntPropertyManager *subIntPropertyManager() const;
 
@@ -485,8 +486,8 @@ class QtRectFPropertyManager : public QtAbstractPropertyManager
 {
     Q_OBJECT
 public:
-    QtRectFPropertyManager(QObject *parent = 0);
-    ~QtRectFPropertyManager();
+    QtRectFPropertyManager(QObject *parent = nullptr);
+    ~QtRectFPropertyManager() override;
 
     QtDoublePropertyManager *subDoublePropertyManager() const;
 
@@ -518,8 +519,8 @@ class QtEnumPropertyManager : public QtAbstractPropertyManager
 {
     Q_OBJECT
 public:
-    QtEnumPropertyManager(QObject *parent = 0);
-    ~QtEnumPropertyManager();
+    QtEnumPropertyManager(QObject *parent = nullptr);
+    ~QtEnumPropertyManager() override;
 
     int value(const QtProperty *property) const;
     QStringList enumNames(const QtProperty *property) const;
@@ -550,8 +551,8 @@ class QtFlagPropertyManager : public QtAbstractPropertyManager
 {
     Q_OBJECT
 public:
-    QtFlagPropertyManager(QObject *parent = 0);
-    ~QtFlagPropertyManager();
+    QtFlagPropertyManager(QObject *parent = nullptr);
+    ~QtFlagPropertyManager() override;
 
     QtBoolPropertyManager *subBoolPropertyManager() const;
 
@@ -580,8 +581,8 @@ class QtSizePolicyPropertyManager : public QtAbstractPropertyManager
 {
     Q_OBJECT
 public:
-    QtSizePolicyPropertyManager(QObject *parent = 0);
-    ~QtSizePolicyPropertyManager();
+    QtSizePolicyPropertyManager(QObject *parent = nullptr);
+    ~QtSizePolicyPropertyManager() override;
 
     QtIntPropertyManager *subIntPropertyManager() const;
     QtEnumPropertyManager *subEnumPropertyManager() const;
@@ -608,8 +609,8 @@ class QtFontPropertyManager : public QtAbstractPropertyManager
 {
     Q_OBJECT
 public:
-    QtFontPropertyManager(QObject *parent = 0);
-    ~QtFontPropertyManager();
+    QtFontPropertyManager(QObject *parent = nullptr);
+    ~QtFontPropertyManager() override;
 
     QtIntPropertyManager *subIntPropertyManager() const;
     QtEnumPropertyManager *subEnumPropertyManager() const;
@@ -638,8 +639,8 @@ class QtColorPropertyManager : public QtAbstractPropertyManager
 {
     Q_OBJECT
 public:
-    QtColorPropertyManager(QObject *parent = 0);
-    ~QtColorPropertyManager();
+    QtColorPropertyManager(QObject *parent = nullptr);
+    ~QtColorPropertyManager() override;
 
     QtIntPropertyManager *subIntPropertyManager() const;
 
@@ -666,8 +667,8 @@ class QtCursorPropertyManager : public QtAbstractPropertyManager
 {
     Q_OBJECT
 public:
-    QtCursorPropertyManager(QObject *parent = 0);
-    ~QtCursorPropertyManager();
+    QtCursorPropertyManager(QObject *parent = nullptr);
+    ~QtCursorPropertyManager() override;
 
 #ifndef QT_NO_CURSOR
     QCursor value(const QtProperty *property) const;

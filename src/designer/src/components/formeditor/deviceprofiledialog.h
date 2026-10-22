@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 //
 //  W A R N I N G
@@ -40,7 +41,7 @@ class DeviceProfileDialog : public QDialog
     Q_OBJECT
 public:
     explicit DeviceProfileDialog(QDesignerDialogGuiInterface *dlgGui, QWidget *parent = nullptr);
-    ~DeviceProfileDialog();
+    ~DeviceProfileDialog() override;
 
     DeviceProfile deviceProfile() const;
     void setDeviceProfile(const DeviceProfile &s);

@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #ifndef QHELPDBREADER_H
 #define QHELPDBREADER_H
@@ -22,6 +23,7 @@
 QT_BEGIN_NAMESPACE
 
 class QSqlQuery;
+class QVersionNumber;
 
 class QHelpDBReader : public QObject
 {
@@ -81,6 +83,8 @@ public:
     QStringList filterAttributes(const QString &filterName = {}) const;
 
     QVariant metaData(const QString &name) const;
+
+    static QVersionNumber versionHeuristic(const QString &namespaceName);
 
 private:
     QString quote(const QString &string) const;

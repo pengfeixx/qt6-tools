@@ -8,7 +8,11 @@
 #include <QAbstractScrollArea>
 #include <QTextDocument>
 
+QT_FORWARD_DECLARE_CLASS(QPrinter)
+
 #include <functional>
+
+QT_BEGIN_NAMESPACE
 
 class QLiteHtmlWidgetPrivate;
 
@@ -46,6 +50,8 @@ public:
     // declaring this Q_INVOKABLE to make it Squish-testable
     Q_INVOKABLE QString selectedText() const;
 
+    void print(QPrinter *printer);
+
 signals:
     void linkClicked(const QUrl &url);
     void linkHighlighted(const QUrl &url);
@@ -77,3 +83,5 @@ private:
 
     QLiteHtmlWidgetPrivate *d;
 };
+
+QT_END_NAMESPACE

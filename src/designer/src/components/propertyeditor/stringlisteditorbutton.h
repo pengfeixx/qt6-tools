@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #ifndef STRINGLISTEDITORBUTTON_H
 #define STRINGLISTEDITORBUTTON_H
@@ -20,8 +21,7 @@ public:
     explicit StringListEditorButton(const QStringList &stringList, QWidget *parent = nullptr);
     ~StringListEditorButton() override;
 
-    inline QStringList stringList() const
-    { return m_stringList; }
+    QStringList stringList() const { return m_stringList; }
 
 signals:
     void stringListChanged(const QStringList &stringList);

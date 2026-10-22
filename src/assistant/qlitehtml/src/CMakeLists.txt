@@ -15,7 +15,7 @@ set(QLITEHTML_VERSION ${PROJECT_VERSION})
 set(QLITEHTML_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
 set(QLITEHTML_VERSION_COMPAT ${QLITEHTML_VERSION} CACHE STRING "qlitehtml compat version number.")
 
-option(QLITEHTML_USE_SYSTEM_LITEHTML "Uses litehtml from the system if available" ON)
+option(QLITEHTML_USE_SYSTEM_LITEHTML "Uses litehtml from the system if available" OFF)
 if(QLITEHTML_USE_SYSTEM_LITEHTML)
   find_package(litehtml QUIET)
 endif()
@@ -89,6 +89,12 @@ if(TARGET litehtml)
   else()
     target_compile_definitions(qlitehtml PUBLIC QLITEHTML_STATIC_LIBRARY)
   endif()
+  if(TARGET Qt${QT_VERSION_MAJOR}::PrintSupport AND QT_FEATURE_printer)
+    target_link_libraries(qlitehtml PRIVATE Qt${QT_VERSION_MAJOR}::PrintSupport)
+    target_compile_definitions(qlitehtml PRIVATE QLITEHTML_HAS_QPRINTER=1)
+  else()
+    target_compile_definitions(qlitehtml PRIVATE QLITEHTML_HAS_QPRINTER=0)
+  endif()
   if (WIN32)
     target_compile_definitions(qlitehtml PRIVATE UNICODE _UNICODE _CRT_SECURE_NO_WARNINGS)
     if (NOT BUILD_WITH_PCH)
@@ -132,12 +138,16 @@ if(TARGET litehtml)
         set(_EXCLUDE EXCLUDE_FROM_ALL)
       endif()
       set(_DEVEL_COMPONENT COMPONENT ${QLITEHTML_DEVEL_COMPONENT} ${_EXCLUDE})
-      set(_NAMELINK NAMELINK_SKIP)
-      install(TARGETS qlitehtml
-        LIBRARY
-        DESTINATION "${QLITEHTML_LIBRARY_PATH}"
-        NAMELINK_ONLY
-        ${_DEVEL_COMPONENT})
+      if(NOT APPLE)
+        set(_NAMELINK NAMELINK_SKIP)
+      endif()
+      if (_NAMELINK)
+        install(TARGETS qlitehtml
+          LIBRARY
+          DESTINATION "${QLITEHTML_LIBRARY_PATH}"
+          NAMELINK_ONLY
+          ${_DEVEL_COMPONENT})
+      endif()
       if(DEFINED QLITEHTML_HEADER_PATH)
         install(
           FILES ${PUBLIC_HEADERS}

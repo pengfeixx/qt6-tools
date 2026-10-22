@@ -17,6 +17,7 @@ QT_BEGIN_NAMESPACE
 class QBoxLayout;
 class QMainWindow;
 class QTextEdit;
+class QCheckBox;
 
 class MessageEditor;
 class FormatTextEdit;
@@ -66,7 +67,6 @@ signals:
     void copyAvailable(bool avail);
     void pasteAvailable(bool avail);
 #endif
-    void beginFromSourceAvailable(bool enable);
 
 public slots:
     void undo();
@@ -89,6 +89,7 @@ private slots:
     void editorCreated(QTextEdit *);
     void editorDestroyed();
     void selectionChanged(QTextEdit *);
+    void toggleNcrMode();
     void resetHoverSelection();
     void emitTranslationChanged(QTextEdit *);
     void emitTranslatorCommentChanged(QTextEdit *);
@@ -118,7 +119,6 @@ private:
     MessageEditorData *modelForWidget(const QObject *o);
     int activeTranslationNumerus() const;
     QStringList translations(int model) const;
-    void updateBeginFromSource();
     void updateUndoRedo();
 #ifndef QT_NO_CLIPBOARD
     void updateCanCutCopy();
@@ -151,6 +151,7 @@ private:
     FormWidget *m_source;
     FormWidget *m_pluralSource;
     FormWidget *m_commentText;
+    QCheckBox *m_ncrModeBox;
     QList<MessageEditorData> m_editors;
 
     QTimer m_tabOrderTimer;

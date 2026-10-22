@@ -20,24 +20,6 @@ class FunctionNode : public Node
 public:
     enum Virtualness { NonVirtual, NormalVirtual, PureVirtual };
 
-    enum Metaness {
-        Plain,
-        Signal,
-        Slot,
-        Ctor,
-        Dtor,
-        CCtor, // copy constructor
-        MCtor, // move-copy constructor
-        MacroWithParams,
-        MacroWithoutParams,
-        Native,
-        CAssign, // copy-assignment operator
-        MAssign, // move-assignment operator
-        QmlSignal,
-        QmlSignalHandler,
-        QmlMethod,
-    };
-
     FunctionNode(Aggregate *parent, const QString &name); // C++ function (Plain)
     FunctionNode(Metaness type, Aggregate *parent, const QString &name, bool attached = false);
 
@@ -55,7 +37,7 @@ public:
     void setVirtualness(const QString &value);
     void setVirtualness(Virtualness virtualness) { m_virtualness = virtualness; }
     void setConst(bool b) { m_const = b; }
-    void setDefault(bool b) { m_default = b; }
+    void setImplicitlyGenerated(bool b) { m_implicitlyGenerated = b; }
     void setStatic(bool b) { m_static = b; }
     void setReimpFlag() { m_reimpFlag = true; }
     void setOverridesThis(const QString &path) { m_overridesThis = path; }
@@ -65,13 +47,14 @@ public:
     [[nodiscard]] QString returnTypeString() const;
     [[nodiscard]] QString virtualness() const;
     [[nodiscard]] bool isConst() const { return m_const; }
-    [[nodiscard]] bool isDefault() const override { return m_default; }
+    [[nodiscard]] bool isImplicitlyGenerated() const { return m_implicitlyGenerated; }
+    [[nodiscard]] bool isInAPI() const override;
     [[nodiscard]] bool isStatic() const override { return m_static; }
     [[nodiscard]] bool isOverload() const { return m_overloadFlag; }
     [[nodiscard]] bool isMarkedReimp() const override { return m_reimpFlag; }
     [[nodiscard]] bool isSomeCtor() const { return isCtor() || isCCtor() || isMCtor(); }
-    [[nodiscard]] bool isMacroWithParams() const { return (m_metaness == MacroWithParams); }
-    [[nodiscard]] bool isMacroWithoutParams() const { return (m_metaness == MacroWithoutParams); }
+    [[nodiscard]] bool isMacroWithParams() const { return (m_metaness == Metaness::MacroWithParams); }
+    [[nodiscard]] bool isMacroWithoutParams() const { return (m_metaness == Metaness::MacroWithoutParams); }
     [[nodiscard]] bool isMacro() const override
     {
         return (isMacroWithParams() || isMacroWithoutParams());
@@ -87,19 +70,39 @@ public:
     void markNoexcept(QString expression = "") { m_noexcept = expression; }
     const std::optional<QString>& getNoexcept() const { return m_noexcept; }
 
-    [[nodiscard]] bool isCppFunction() const { return m_metaness == Plain; } // Is this correct?
-    [[nodiscard]] bool isSignal() const { return (m_metaness == Signal); }
-    [[nodiscard]] bool isSlot() const { return (m_metaness == Slot); }
-    [[nodiscard]] bool isCtor() const { return (m_metaness == Ctor); }
-    [[nodiscard]] bool isDtor() const { return (m_metaness == Dtor); }
-    [[nodiscard]] bool isCCtor() const { return (m_metaness == CCtor); }
-    [[nodiscard]] bool isMCtor() const { return (m_metaness == MCtor); }
-    [[nodiscard]] bool isCAssign() const { return (m_metaness == CAssign); }
-    [[nodiscard]] bool isMAssign() const { return (m_metaness == MAssign); }
+    void markExplicitlyDefaulted() { m_explicitlyDefaulted = true; }
+    [[nodiscard]] bool isExplicitlyDefaulted() const { return m_explicitlyDefaulted; }
 
-    [[nodiscard]] bool isQmlMethod() const { return (m_metaness == QmlMethod); }
-    [[nodiscard]] bool isQmlSignal() const { return (m_metaness == QmlSignal); }
-    [[nodiscard]] bool isQmlSignalHandler() const { return (m_metaness == QmlSignalHandler); }
+    void markDeletedAsWritten() { m_deleted = true; }
+    [[nodiscard]] bool isDeletedAsWritten() const { return m_deleted; }
+
+    void setHiddenFriend(bool b) { m_hiddenFriend = b; }
+    [[nodiscard]] bool isHiddenFriend() const { return m_hiddenFriend; }
+
+    void setTrailingRequiresClause(const QString &clause) {
+        if (clause.isEmpty())
+            m_trailingRequiresClause.reset();
+        else
+            m_trailingRequiresClause = clause;
+    }
+    const std::optional<QString>& trailingRequiresClause() const { return m_trailingRequiresClause; }
+
+    void setReferencedConcepts(QStringList refs) { m_referencedConcepts = std::move(refs); }
+    const QStringList &referencedConcepts() const { return m_referencedConcepts; }
+
+    [[nodiscard]] bool isCppFunction() const { return m_metaness == Metaness::Plain; } // Is this correct?
+    [[nodiscard]] bool isSignal() const { return (m_metaness == Metaness::Signal); }
+    [[nodiscard]] bool isSlot() const { return (m_metaness == Metaness::Slot); }
+    [[nodiscard]] bool isCtor() const { return (m_metaness == Metaness::Ctor); }
+    [[nodiscard]] bool isDtor() const { return (m_metaness == Metaness::Dtor); }
+    [[nodiscard]] bool isCCtor() const { return (m_metaness == Metaness::CCtor); }
+    [[nodiscard]] bool isMCtor() const { return (m_metaness == Metaness::MCtor); }
+    [[nodiscard]] bool isCAssign() const { return (m_metaness == Metaness::CAssign); }
+    [[nodiscard]] bool isMAssign() const { return (m_metaness == Metaness::MAssign); }
+
+    [[nodiscard]] bool isQmlMethod() const { return (m_metaness == Metaness::QmlMethod); }
+    [[nodiscard]] bool isQmlSignal() const { return (m_metaness == Metaness::QmlSignal); }
+    [[nodiscard]] bool isQmlSignalHandler() const { return (m_metaness == Metaness::QmlSignalHandler); }
 
     [[nodiscard]] bool isSpecialMemberFunction() const
     {
@@ -107,7 +110,7 @@ public:
     }
     [[nodiscard]] bool isNonvirtual() const { return (m_virtualness == NonVirtual); }
     [[nodiscard]] bool isVirtual() const { return (m_virtualness == NormalVirtual); }
-    [[nodiscard]] bool isPureVirtual() const { return (m_virtualness == PureVirtual); }
+    [[nodiscard]] bool isPureVirtual() const override { return (m_virtualness == PureVirtual); }
     [[nodiscard]] bool returnsBool() const { return (m_returnType.first == QLatin1String("bool")); }
 
     Parameters &parameters() { return m_parameters; }
@@ -162,8 +165,12 @@ public:
     void setOverloadFlag() { m_overloadFlag = true; }
     void setOverloadNumber(signed short number);
     [[nodiscard]] signed short overloadNumber() const { return m_overloadNumber; }
+    void setPrimaryOverloadFlag() { m_primaryOverloadFlag = true; }
+    [[nodiscard]] bool isPrimaryOverload() const { return m_primaryOverloadFlag; }
 
     friend int compare(const FunctionNode *f1, const FunctionNode *f2);
+
+    [[nodiscard]] virtual Status status() const override;
 
 private:
     void addAssociatedProperty(PropertyNode *property);
@@ -172,20 +179,26 @@ private:
     friend class PropertyNode;
 
     bool m_const : 1;
-    bool m_default : 1;
+    bool m_implicitlyGenerated : 1;
     bool m_static : 1;
     bool m_reimpFlag : 1;
     bool m_attached : 1;
     bool m_overloadFlag : 1;
+    bool m_primaryOverloadFlag : 1;
     bool m_isFinal : 1;
     bool m_isOverride : 1;
     bool m_isRef : 1;
     bool m_isRefRef : 1;
     bool m_isInvokable : 1;
+    bool m_explicitlyDefaulted : 1;
+    bool m_deleted : 1;
+    bool m_hiddenFriend : 1;
     bool m_explicit;
     bool m_constexpr;
 
     std::optional<QString> m_noexcept;
+    std::optional<QString> m_trailingRequiresClause;
+    QStringList m_referencedConcepts {};
 
     Metaness m_metaness {};
     Virtualness m_virtualness{ NonVirtual };

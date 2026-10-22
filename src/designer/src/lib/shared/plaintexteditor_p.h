@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 //
 //  W A R N I N G
@@ -30,7 +31,7 @@ class QDESIGNER_SHARED_EXPORT PlainTextEditorDialog : public QDialog
     Q_OBJECT
 public:
     explicit PlainTextEditorDialog(QDesignerFormEditorInterface *core, QWidget *parent = nullptr);
-    ~PlainTextEditorDialog();
+    ~PlainTextEditorDialog() override;
 
     int showDialog();
 

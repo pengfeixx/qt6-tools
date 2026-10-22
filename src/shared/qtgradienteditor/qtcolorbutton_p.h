@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 //
 //  W A R N I N G
@@ -15,7 +16,7 @@
 #ifndef QTCOLORBUTTON_H
 #define QTCOLORBUTTON_H
 
-#include <QtWidgets/QToolButton>
+#include <QtWidgets/qtoolbutton.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -24,8 +25,8 @@ class QtColorButton : public QToolButton
     Q_OBJECT
     Q_PROPERTY(bool backgroundCheckered READ isBackgroundCheckered WRITE setBackgroundCheckered)
 public:
-    QtColorButton(QWidget *parent = 0);
-    ~QtColorButton();
+    QtColorButton(QWidget *parent = nullptr);
+    ~QtColorButton() override;
 
     bool isBackgroundCheckered() const;
     void setBackgroundCheckered(bool checkered);

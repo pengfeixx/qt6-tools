@@ -1,7 +1,12 @@
+usr/bin/pixeltool6
+usr/bin/qdbusviewer6
+usr/bin/qdistancefieldgenerator6
+usr/bin/qtdiag6
+usr/bin/qtplugininfo6
 usr/lib/qt6/bin/pixeltool
 usr/lib/qt6/bin/qdbusviewer
 usr/lib/qt6/bin/qdistancefieldgenerator
-usr/lib/qt6/bin/qtdiag
 usr/lib/qt6/bin/qtdiag6
 usr/lib/qt6/bin/qtplugininfo
-usr/lib/qt6/libexec/lprodump
+usr/bin/kmap2qmap6
+usr/lib/qt6/bin/kmap2qmap

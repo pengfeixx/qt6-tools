@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 //
 //  W A R N I N G
@@ -22,7 +23,6 @@
 #include <QtDesigner/qextensionmanager.h>
 
 #include <QtCore/qvariant.h>
-#include <QtCore/qpair.h>
 
 #include <QtCore/qpointer.h>
 
@@ -119,7 +119,12 @@ public:
                         PropertyLayoutSpacing,
                         PropertyLayoutHorizontalSpacing,
                         PropertyLayoutVerticalSpacing,
+#if QT_VERSION < QT_VERSION_CHECK(7, 0, 0)
                         PropertyLayoutSizeConstraint,
+#else
+                        PropertyLayoutHorizontalSizeConstraint,
+                        PropertyLayoutVerticalSizeConstraint,
+#endif
                         PropertyLayoutFieldGrowthPolicy,
                         PropertyLayoutRowWrapPolicy,
                         PropertyLayoutLabelAlignment,
@@ -224,7 +229,7 @@ QObject *QDesignerPropertySheetFactory<Object, PropertySheet>::createPropertyShe
 template <class Object, class PropertySheet>
 void QDesignerPropertySheetFactory<Object, PropertySheet>::registerExtension(QExtensionManager *mgr)
 {
-    QDesignerPropertySheetFactory *factory = new QDesignerPropertySheetFactory(mgr);
+    auto *factory = new QDesignerPropertySheetFactory(mgr);
     mgr->registerExtensions(factory, Q_TYPEID(QDesignerPropertySheetExtension));
     mgr->registerExtensions(factory, Q_TYPEID(QDesignerDynamicPropertySheetExtension));
 }

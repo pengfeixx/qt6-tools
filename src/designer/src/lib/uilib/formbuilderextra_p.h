@@ -1,5 +1,6 @@
 // Copyright (C) 2020 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #ifndef ABSTRACTFORMBUILDERPRIVATE_H
 #define ABSTRACTFORMBUILDERPRIVATE_H
@@ -22,6 +23,7 @@
 #include <QtCore/qstringlist.h>
 #include <QtCore/qmap.h>
 #include <QtCore/qdir.h>
+#include <QtCore/qversionnumber.h>
 #include <QtGui/qpalette.h>
 
 QT_BEGIN_NAMESPACE
@@ -151,6 +153,8 @@ public:
     static DomProperty *propertyByName(const QList<DomProperty*> &properties,
                                        QAnyStringView needle);
 
+    static bool isQFontComboBox(const QWidget *w);
+
     QStringList m_pluginPaths;
     QMap<QString, QDesignerCustomWidgetInterface*> m_customWidgets;
 
@@ -158,6 +162,7 @@ public:
     QHash<QString, QAction*> m_actions;
     QHash<QString, QActionGroup*> m_actionGroups;
     bool m_fullyQualifiedEnums = true;
+    QVersionNumber m_saveVersion{ QT_VERSION_MAJOR, QT_VERSION_MINOR, QT_VERSION_PATCH };
     int m_defaultMargin;
     int m_defaultSpacing;
     QDir m_workingDirectory;

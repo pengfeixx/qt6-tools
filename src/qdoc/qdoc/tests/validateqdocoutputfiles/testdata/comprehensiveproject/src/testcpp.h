@@ -42,6 +42,14 @@ using Specialized = Struct<int, T>;
         VeryLastValue
     };
 #endif
+    enum Admonitions {
+        NoteInValue,
+        WarningInValue,
+        ImportantInValue,
+        MultipleAdmonitions,
+        MultipleNotes
+    };
+
     typedef struct {
         int data;
     } SomeType;
@@ -94,9 +102,13 @@ class TestDerived : public Test {
     Q_PROPERTY(const QString *name READ name)
     QDOC_PROPERTY(bool boolProp READ boolProp WRITE setBoolProp NOTIFY boolPropChanged RESET resetBoolProp REVISION 1)
     QDOC_PROPERTY(bool secondBoolProp READ secondBoolProp NOTIFY boolPropChanged)
+    Q_PROPERTY(int duplicate READ duplicate)
 #endif
 
 public:
+
+    enum { Val1, Val2 };
+    enum { Val3, Val4 };
     using DerivedType = Test::SomeType;
     using NotTypedef = int;
     void virtualFun() override;
@@ -110,6 +122,7 @@ public:
     bool boolProp();
     bool secondBoolProp() { return boolProp(); }
     const QString *name() const;
+    int duplicate() { return 0; }
 
     Q_INVOKABLE void invokeMe() const {}
     int id() override;

@@ -25,7 +25,7 @@ FindWidget::FindWidget(QWidget *parent)
     QHBoxLayout *hboxLayout = new QHBoxLayout(this);
     QString resourcePath = ":/qt-project.org/assistant/images/"_L1;
 
-#ifndef Q_OS_MAC
+#ifndef Q_OS_MACOS
     hboxLayout->setContentsMargins({});
     hboxLayout->setSpacing(6);
     resourcePath.append("win"_L1);
@@ -111,8 +111,9 @@ void FindWidget::setPalette(bool found)
 {
     TRACE_OBJ
     QPalette palette = editFind->palette();
-    palette.setColor(QPalette::Active, QPalette::Base, found ? Qt::white
-        : QColor(255, 102, 102));
+    palette.setColor(QPalette::Active, QPalette::Base,
+                     found ? QApplication::palette().color(QPalette::Active, QPalette::Base)
+                           : QColor(255, 102, 102));
     editFind->setPalette(palette);
 }
 

@@ -1,8 +1,14 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only
 
-#include <QtTest/QtTest>
-#include <QtCore/QFile>
+#include <QFile>
+#include <QLibraryInfo>
+#include <QProcess>
+#include <QTemporaryDir>
+#include <QTest>
+#include <QTextStream>
+
+using namespace Qt::Literals::StringLiterals;
 
 class tst_lconvert : public QObject
 {
@@ -24,6 +30,9 @@ private slots:
     void chains_data();
     void chains();
     void merge();
+    void qmRoundtripPreservesBytes();
+    void tsLineEndings_data();
+    void tsLineEndings();
 
 private:
     void doWait(QProcess *cvt, int stage);
@@ -39,10 +48,56 @@ private:
     QString lconvert;
 };
 
+static void writePoMessages(QTextStream &out, int num, const QString &str)
+{
+    for (int i = 0; i < (1 << num); ++i) {
+        out << "\n";
+        out << "msgid \"singular " << str << " " << i << "\"\n";
+        out << "msgid_plural \"plural " << str << " " << i << "\"\n";
+        for (int j = 0; j < num; ++j) {
+            QString tr;
+            if ((i & (1 << j)) == 0)
+                tr = u"translated %1 %2 %3"_s.arg(str).arg(i).arg(j);
+            out << "msgstr[" << j << "] \"" << tr << "\"\n";
+        }
+    }
+}
+
+static void createPluralPoFile(const QString &outdir, int num, const QString &lang,
+                               const QString &pluralForms)
+{
+    QString filename = outdir + u"plural-%1.po"_s.arg(num);
+    QFile file(filename);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        qWarning() << "Cannot write file in" << outdir;
+        return;
+    }
+
+    QTextStream out(&file);
+    out << R"(msgid ""
+msgstr ""
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-FooBar: yup\n"
+"X-Language: )" << lang << R"(\n"
+"Plural-Forms: )" << pluralForms << "\\n\"\n";
+
+    writePoMessages(out, num, "one"_L1);
+    writePoMessages(out, num, "two"_L1);
+    writePoMessages(out, num, "three"_L1);
+    writePoMessages(out, num, "four"_L1);
+}
+
 void tst_lconvert::initTestCase()
 {
-    if (!QFile::exists(dataDir + QLatin1String("plural-1.po")))
-        QProcess::execute(QLatin1String(PERL_EXECUTABLE), QStringList() << dataDir + QLatin1String("makeplurals.pl") << dataDir + QLatin1String(""));
+    if (!QFile::exists(dataDir + QLatin1String("plural-1.po"))) {
+        createPluralPoFile(dataDir, 1, u"zh_CN"_s, u"nplurals=1; plural=0;"_s);
+        createPluralPoFile(dataDir, 2, u"de_DE"_s, u"nplurals=2; plural=(n != 1);"_s);
+        createPluralPoFile(dataDir, 3, u"pl_PL"_s,
+                           u"nplurals=3; plural=(n==1 ? 0 : n%10>=2 && "_s
+                           u"n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);"_s);
+    }
     QVERIFY(QFile::exists(dataDir + QLatin1String("plural-1.po")));
 }
 
@@ -292,6 +347,8 @@ void tst_lconvert::roundtrips_data()
     QTest::newRow("ts-qm-ts (variants)") << "variants.ts" << tsQmTs << outDeArgs;
     QTest::newRow("ts-po-ts (msgid)") << "msgid.ts" << tsPoTs << noArgs;
     QTest::newRow("ts-xliff-ts (msgid)") << "msgid.ts" << tsXlfTs << noArgs;
+    QTest::newRow("ts-qm-ts (emptymsg)") << "emptymsg.ts" << tsQmTs << noArgs;
+    QTest::newRow("ts-xliff-ts (emptymsg)") << "emptymsg.ts" << tsXlfTs << noArgs;
 
     QTest::newRow("ts-po-ts (endless loop)") << "endless-po-loop.ts" << tsPoTs << noArgs;
     QTest::newRow("ts-qm-ts (whitespace)") << "whitespace.ts" << tsQmTs << noArgs;
@@ -316,6 +373,151 @@ void tst_lconvert::merge()
     doWait(&cvt, 1);
     if (!QTest::currentTestFailed())
         doCompare(&cvt, dataDir + "idxmerge.ts.out");
+}
+
+// Regression: Translator::save() previously applied QIODevice::Text on Windows
+// to all output formats. For binary formats (.qm), every \n byte was then
+// expanded to \r\n whenever the destination already existed and contained
+// \r\n bytes in its first 4096 bytes (which the CRLF-preservation heuristic
+// reads as "destination uses CRLF"). The result was a corrupted .qm that
+// QTranslator silently rejected at load time.
+void tst_lconvert::qmRoundtripPreservesBytes()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+
+    // Generate a .qm whose first 4096 bytes contain a \r\n byte pair. The
+    // &#xD;&#xA; entities in the translation survive into the binary output.
+    const char seedTs[] = R"(<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE TS>
+<TS version="2.1" language="de_DE">
+<context>
+    <name>X</name>
+    <message>
+        <source>a&#xD;&#xA;b</source>
+        <translation>x&#xD;&#xA;y</translation>
+    </message>
+</context>
+</TS>
+)";
+    const QString seed = tmp.filePath("seed.ts"_L1);
+    {
+        QFile f(seed);
+        QVERIFY2(f.open(QIODevice::WriteOnly), qPrintable(f.errorString()));
+        const QByteArray bytes = QByteArray(seedTs);
+        QCOMPARE(f.write(bytes), bytes.size());
+    }
+
+    const QString input = tmp.filePath("input.qm"_L1);
+    QProcess gen;
+    gen.start(lconvert, QStringList{ seed, "-of"_L1, "qm"_L1, "-o"_L1, input });
+    QVERIFY2(gen.waitForStarted(), qPrintable(gen.errorString()));
+    doWait(&gen, 0);
+    if (QTest::currentTestFailed())
+        return;
+
+    QByteArray expected;
+    {
+        QFile f(input);
+        QVERIFY2(f.open(QIODevice::ReadOnly), qPrintable(f.errorString()));
+        expected = f.readAll();
+    }
+    QVERIFY(!expected.isEmpty());
+    if (!expected.left(4096).contains("\r\n"))
+        QSKIP("Generated .qm contains no CRLF bytes; cannot exercise regression");
+
+    // Pre-populate the destination so usesCRLF() would observe CRLF bytes.
+    const QString output = tmp.filePath("output.qm"_L1);
+    QVERIFY(QFile::copy(input, output));
+
+    QProcess cvt;
+    cvt.start(lconvert, QStringList{ input, "-o"_L1, output });
+    QVERIFY2(cvt.waitForStarted(), qPrintable(cvt.errorString()));
+    doWait(&cvt, 1);
+    if (QTest::currentTestFailed())
+        return;
+
+    QByteArray actual;
+    {
+        QFile f(output);
+        QVERIFY2(f.open(QIODevice::ReadOnly), qPrintable(f.errorString()));
+        actual = f.readAll();
+    }
+    QCOMPARE(actual, expected);
+}
+
+void tst_lconvert::tsLineEndings_data()
+{
+    QTest::addColumn<QByteArray>("seedLineEnding"); // "" = no destination, "\n" or "\r\n"
+    QTest::addColumn<bool>("expectCRLF");
+
+#ifdef Q_OS_WIN
+    QTest::newRow("preserve CRLF") << QByteArray("\r\n") << true;
+#endif
+    QTest::newRow("preserve LF") << QByteArray("\n") << false;
+    QTest::newRow("new file defaults to LF") << QByteArray() << false;
+}
+
+void tst_lconvert::tsLineEndings()
+{
+    QFETCH(QByteArray, seedLineEnding);
+    QFETCH(bool, expectCRLF);
+
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+
+    QByteArray src;
+    {
+        QFile f(dataDir + "untranslated.ts"_L1);
+        QVERIFY2(f.open(QIODevice::ReadOnly), qPrintable(f.errorString()));
+        src = f.readAll();
+    }
+    QVERIFY(!src.isEmpty());
+    src.replace("\r\n", "\n");
+
+    const QString input = tmp.filePath("input.ts"_L1);
+    {
+        QFile f(input);
+        QVERIFY2(f.open(QIODevice::WriteOnly), qPrintable(f.errorString()));
+        QCOMPARE(f.write(src), src.size());
+    }
+
+    const QString output = tmp.filePath("output.ts"_L1);
+    if (!seedLineEnding.isEmpty()) {
+        QByteArray seed = src;
+        if (seedLineEnding == "\r\n")
+            seed.replace("\n", "\r\n");
+        QFile f(output);
+        QVERIFY2(f.open(QIODevice::WriteOnly), qPrintable(f.errorString()));
+        QCOMPARE(f.write(seed), seed.size());
+    } else {
+        QVERIFY(!QFile::exists(output));
+    }
+
+    QProcess cvt;
+    cvt.start(lconvert, QStringList{ input, "-o"_L1, output });
+    QVERIFY2(cvt.waitForStarted(), qPrintable(cvt.errorString()));
+    doWait(&cvt, 0);
+    if (QTest::currentTestFailed())
+        return;
+
+    QByteArray bytes;
+    {
+        QFile f(output);
+        QVERIFY2(f.open(QIODevice::ReadOnly), qPrintable(f.errorString()));
+        bytes = f.readAll();
+    }
+    QVERIFY(!bytes.isEmpty());
+
+    if (expectCRLF) {
+        QVERIFY2(bytes.contains("\r\n"), "Output should contain CRLF");
+        for (qsizetype i = 0; i < bytes.size(); ++i) {
+            if (bytes[i] == '\n')
+                QVERIFY2(i > 0 && bytes[i - 1] == '\r', "Bare LF found in CRLF output");
+        }
+    } else {
+        QVERIFY2(!bytes.contains("\r\n"), "Output should not contain CRLF");
+    }
 }
 
 QTEST_APPLESS_MAIN(tst_lconvert)

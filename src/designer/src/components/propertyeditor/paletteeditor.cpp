@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #include "paletteeditor.h"
 
@@ -34,6 +35,8 @@
 #include <QtCore/qmetaobject.h>
 #include <QtCore/qsavefile.h>
 #include <QtCore/qxmlstream.h>
+
+#include <memory>
 
 QT_BEGIN_NAMESPACE
 
@@ -287,7 +290,7 @@ static bool savePalette(const QString &fileName, const QPalette &pal, QString *e
         return false;
     }
     {
-        QScopedPointer<DomPalette> domPalette(QFormBuilderExtra::savePalette(pal));
+        std::unique_ptr<DomPalette> domPalette(QFormBuilderExtra::savePalette(pal));
         QXmlStreamWriter writer(&file);
         writer.setAutoFormatting(true);
         writer.setAutoFormattingIndent(1);
@@ -334,13 +337,13 @@ static bool loadPalette(const QString &fileName, QPalette *pal, QString *errorMe
         *errorMessage = msgCannotReadPalette(fileName, reader, why);
         return false;
     }
-    QScopedPointer<DomPalette> domPalette(new DomPalette);
+    auto domPalette = std::make_unique<DomPalette>();
     domPalette->read(reader);
     if (reader.hasError()) {
         *errorMessage = msgCannotReadPalette(fileName, reader);
         return false;
     }
-    *pal = QFormBuilderExtra::loadPalette(domPalette.data());
+    *pal = QFormBuilderExtra::loadPalette(domPalette.get());
     return true;
 }
 
@@ -662,7 +665,7 @@ void RoleEditor::emitResetProperty()
 
 //////////////////////////
 ColorDelegate::ColorDelegate(QDesignerFormEditorInterface *core, QObject *parent) :
-    QItemDelegate(parent),
+    QStyledItemDelegate(parent),
     m_core(core)
 {
 }
@@ -722,7 +725,7 @@ void ColorDelegate::setModelData(QWidget *ed, QAbstractItemModel *model,
 void ColorDelegate::updateEditorGeometry(QWidget *ed,
                 const QStyleOptionViewItem &option, const QModelIndex &index) const
 {
-    QItemDelegate::updateEditorGeometry(ed, option, index);
+    QStyledItemDelegate::updateEditorGeometry(ed, option, index);
     ed->setGeometry(ed->geometry().adjusted(0, 0, -1, -1));
 }
 
@@ -752,7 +755,7 @@ void ColorDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opt,
         painter->fillRect(option.rect, br);
         painter->restore();
     }
-    QItemDelegate::paint(painter, option, index);
+    QStyledItemDelegate::paint(painter, option, index);
 
 
     const QColor color = static_cast<QRgb>(QApplication::style()->styleHint(QStyle::SH_Table_GridLineColor, &option));
@@ -768,7 +771,7 @@ void ColorDelegate::paint(QPainter *painter, const QStyleOptionViewItem &opt,
 
 QSize ColorDelegate::sizeHint(const QStyleOptionViewItem &opt, const QModelIndex &index) const
 {
-    return QItemDelegate::sizeHint(opt, index) + QSize(4, 4);
+    return QStyledItemDelegate::sizeHint(opt, index) + QSize(4, 4);
 }
 }
 

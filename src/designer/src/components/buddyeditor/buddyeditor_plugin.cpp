@@ -1,10 +1,13 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #include <QtGui/qaction.h>
 
 #include "buddyeditor_plugin.h"
 #include "buddyeditor_tool.h"
+
+#include <iconloader_p.h>
 
 #include <QtDesigner/abstractformwindow.h>
 #include <QtDesigner/abstractformwindowmanager.h>
@@ -31,9 +34,7 @@ void BuddyEditorPlugin::initialize(QDesignerFormEditorInterface *core)
 
     m_action = new QAction(tr("Edit Buddies"), this);
     m_action->setObjectName(u"__qt_edit_buddies_action"_s);
-    QIcon buddyIcon = QIcon::fromTheme(u"designer-edit-buddy"_s,
-                                       QIcon(core->resourceLocation() + "/buddytool.png"_L1));
-    m_action->setIcon(buddyIcon);
+    m_action->setIcon(createIconSet("buddytool.png"_L1));
     m_action->setEnabled(false);
 
     setParent(core);

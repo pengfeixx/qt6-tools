@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 //
 //  W A R N I N G
@@ -15,7 +16,7 @@
 #ifndef QTGRADIENTDIALOG_H
 #define QTGRADIENTDIALOG_H
 
-#include <QtWidgets/QDialog>
+#include <QtWidgets/qdialog.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -27,8 +28,8 @@ class QtGradientDialog : public QDialog
     Q_PROPERTY(bool detailsVisible READ detailsVisible WRITE setDetailsVisible)
     Q_PROPERTY(bool detailsButtonVisible READ isDetailsButtonVisible WRITE setDetailsButtonVisible)
 public:
-    QtGradientDialog(QWidget *parent = 0);
-    ~QtGradientDialog();
+    explicit QtGradientDialog(QWidget *parent = nullptr);
+    ~QtGradientDialog() override;
 
     void setGradient(const QGradient &gradient);
     QGradient gradient() const;
@@ -45,8 +46,10 @@ public:
     QColor::Spec spec() const;
     void setSpec(QColor::Spec spec);
 
-    static QGradient getGradient(bool *ok, const QGradient &initial, QWidget *parent = 0, const QString &caption = QString());
-    static QGradient getGradient(bool *ok, QWidget *parent = 0, const QString &caption = QString());
+    static QGradient getGradient(bool *ok, const QGradient &initial, QWidget *parent = nullptr,
+                                 const QString &caption = QString());
+    static QGradient getGradient(bool *ok, QWidget *parent = nullptr,
+                                 const QString &caption = QString());
 
 private:
     QScopedPointer<class QtGradientDialogPrivate> d_ptr;

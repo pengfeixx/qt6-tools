@@ -19,7 +19,8 @@ public:
     virtual void terminateMarker();
     virtual bool recognizeCode(const QString & /*code*/) { return true; }
     virtual bool recognizeExtension(const QString & /*extension*/) { return true; }
-    virtual bool recognizeLanguage(const QString & /*language*/) { return false; }
+    virtual bool recognizeFileName(const QString &name);
+    virtual bool recognizeLanguage(const QString &language);
     [[nodiscard]] virtual Atom::AtomType atomType() const { return Atom::Code; }
     virtual QString markedUpCode(const QString &code, const Node * /*relative*/,
                                  const Location & /*location*/)
@@ -42,11 +43,9 @@ public:
     static CodeMarker *markerForCode(const QString &code);
     static CodeMarker *markerForFileName(const QString &fileName);
     static CodeMarker *markerForLanguage(const QString &lang);
-    static const Node *nodeForString(const QString &string);
-    static QString stringForNode(const Node *node);
     static QString extraSynopsis(const Node *node, Section::Style style);
 
-    QString typified(const QString &string, bool trailingSpace = false);
+    static QString typified(const QString &string, bool trailingSpace = false);
 
 protected:
     static QString protect(const QString &string);

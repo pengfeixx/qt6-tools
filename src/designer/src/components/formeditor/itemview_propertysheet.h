@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #ifndef ITEMVIEW_PROPERTYSHEET_H
 #define ITEMVIEW_PROPERTYSHEET_H
@@ -23,7 +24,7 @@ class ItemViewPropertySheet: public QDesignerPropertySheet
 public:
     explicit ItemViewPropertySheet(QTreeView *treeViewObject, QObject *parent = nullptr);
     explicit ItemViewPropertySheet(QTableView *tableViewObject, QObject *parent = nullptr);
-    ~ItemViewPropertySheet();
+    ~ItemViewPropertySheet() override;
 
     QHash<QString,QString> propertyNameMap() const;
 

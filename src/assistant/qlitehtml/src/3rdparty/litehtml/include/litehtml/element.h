@@ -1,12 +1,12 @@
 #ifndef LH_ELEMENT_H
 #define LH_ELEMENT_H
 
+#include <functional>
 #include <memory>
 #include <tuple>
 #include <list>
+#include "types.h"
 #include "stylesheet.h"
-#include "css_offsets.h"
-#include "css_margins.h"
 #include "css_properties.h"
 
 namespace litehtml
@@ -55,6 +55,9 @@ namespace litehtml
 		bool						is_float()					const;
 		bool						is_block_formatting_context() const;
 
+		pixel_t						v_scroll(pixel_t dy)		const;
+		pixel_t						h_scroll(pixel_t dx)		const;
+
 		bool						is_root() const;
 		element::ptr				parent() const;
 		void						parent(const element::ptr& par);
@@ -63,6 +66,8 @@ namespace litehtml
 
 		std::shared_ptr<document>	get_document() const;
 		const std::list<std::shared_ptr<element>>& children() const;
+
+		std::shared_ptr<render_item> get_render_item();
 
 		virtual elements_list		select_all(const string& selector);
 		virtual elements_list		select_all(const css_selector& selector);
@@ -94,28 +99,18 @@ namespace litehtml
 		virtual bool				on_mouse_over();
 		virtual bool				on_mouse_leave();
 		virtual bool				on_lbutton_down();
-		virtual bool				on_lbutton_up();
+		virtual bool				on_lbutton_up(bool is_click = true);
 		virtual void				on_click();
 		virtual bool				set_pseudo_class(string_id cls, bool add);
 		virtual bool				set_class(const char* pclass, bool add);
 		virtual bool				is_replaced() const;
 		virtual void				compute_styles(bool recursive = true);
-		virtual void				draw(uint_ptr hdc, int x, int y, const position *clip, const std::shared_ptr<render_item>& ri);
-		virtual void				draw_background(uint_ptr hdc, int x, int y, const position *clip, const std::shared_ptr<render_item> &ri);
-		virtual int					get_enum_property  (string_id name, bool inherited, int           default_value, uint_ptr css_properties_member_offset) const;
-		virtual int					get_int_property   (string_id name, bool inherited, int           default_value, uint_ptr css_properties_member_offset) const;
-		virtual css_length			get_length_property(string_id name, bool inherited, css_length    default_value, uint_ptr css_properties_member_offset) const;
-		virtual web_color			get_color_property (string_id name, bool inherited, web_color     default_value, uint_ptr css_properties_member_offset) const;
-		virtual string				get_string_property(string_id name, bool inherited, const string& default_value, uint_ptr css_properties_member_offset) const;
-		virtual float				get_number_property(string_id name, bool inherited, float         default_value, uint_ptr css_properties_member_offset) const;
-		virtual string_vector		get_string_vector_property(string_id name, bool inherited, const string_vector& default_value, uint_ptr css_properties_member_offset) const;
-		virtual int_vector			get_int_vector_property   (string_id name, bool inherited, const int_vector&    default_value, uint_ptr css_properties_member_offset) const;
-		virtual length_vector		get_length_vector_property(string_id name, bool inherited, const length_vector& default_value, uint_ptr css_properties_member_offset) const;
-		virtual size_vector			get_size_vector_property  (string_id name, bool inherited, const size_vector&   default_value, uint_ptr css_properties_member_offset) const;
-		virtual string				get_custom_property(string_id name, const string& default_value) const;
+		virtual void				draw(uint_ptr hdc, pixel_t x, pixel_t y, const position *clip, const std::shared_ptr<render_item>& ri);
+		virtual void				draw_background(uint_ptr hdc, pixel_t x, pixel_t y, const position *clip, const std::shared_ptr<render_item> &ri);
 
-		virtual void				get_text(string& text);
+		virtual void				get_text(string& text) const;
 		virtual void				parse_attributes();
+		virtual int					select(const css_selector::vector& selector_list, bool apply_pseudo = true);
 		virtual int					select(const string& selector);
 		virtual int					select(const css_selector& selector, bool apply_pseudo = true);
 		virtual int					select(const css_element_selector& selector, bool apply_pseudo = true);
@@ -123,9 +118,9 @@ namespace litehtml
 		virtual bool				is_ancestor(const ptr &el) const;
 		virtual element::ptr		find_adjacent_sibling(const element::ptr& el, const css_selector& selector, bool apply_pseudo = true, bool* is_pseudo = nullptr);
 		virtual element::ptr		find_sibling(const element::ptr& el, const css_selector& selector, bool apply_pseudo = true, bool* is_pseudo = nullptr);
-		virtual void				get_content_size(size& sz, int max_width);
-		virtual bool				is_nth_child(const element::ptr& el, int num, int off, bool of_type) const;
-		virtual bool				is_nth_last_child(const element::ptr& el, int num, int off, bool of_type) const;
+		virtual void				get_content_size(size& sz, pixel_t max_width);
+		virtual bool				is_nth_child(const element::ptr& el, int num, int off, bool of_type, const css_selector::vector& selector_list = {}) const;
+		virtual bool				is_nth_last_child(const element::ptr& el, int num, int off, bool of_type, const css_selector::vector& selector_list = {}) const;
 		virtual bool				is_only_child(const element::ptr& el, bool of_type) const;
 		virtual void				add_style(const style& style);
 		virtual const background*	get_background(bool own_only = false);
@@ -153,6 +148,8 @@ namespace litehtml
 		void				increment_counter(const string_id& counter_name_id, const int increment = 1);
 		void				reset_counter(const string_id& counter_name_id, const int value = 0);
 
+		void				run_on_renderers(const std::function<bool(const std::shared_ptr<render_item>&)>& func);
+
 	private:
 		std::vector<element::ptr> get_siblings_before() const;
 		bool				find_counter(const string_id& counter_name_id, std::map<string_id, int>::iterator& map_iterator);
@@ -165,7 +162,9 @@ namespace litehtml
 
 	inline bool litehtml::element::in_normal_flow() const
 	{
-		if(css().get_position() != element_position_absolute && css().get_display() != display_none)
+		if(css().get_position() != element_position_absolute &&
+		   css().get_display() != display_none &&
+		   css().get_position() != element_position_fixed)
 		{
 			return true;
 		}
@@ -217,8 +216,7 @@ namespace litehtml
 		if (css().get_display() == display_block ||
 			css().get_display() == display_flex ||
 			css().get_display() == display_table ||
-			css().get_display() == display_list_item ||
-			css().get_display() == display_flex)
+			css().get_display() == display_list_item)
 		{
 			return true;
 		}
@@ -228,6 +226,15 @@ namespace litehtml
 	inline const std::list<std::shared_ptr<element>>& element::children() const
 	{
 		return m_children;
+	}
+
+	inline std::shared_ptr<render_item> element::get_render_item()
+	{
+		if(m_renders.empty())
+		{
+			return nullptr;
+		}
+		return m_renders.front().lock();
 	}
 }
 

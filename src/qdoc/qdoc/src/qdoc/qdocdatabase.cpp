@@ -7,8 +7,12 @@
 #include "collectionnode.h"
 #include "functionnode.h"
 #include "generator.h"
+#include "genustypes.h"
 #include "qdocindexfiles.h"
+#include "qdoclogging.h"
+#include "qmltypenode.h"
 #include "tree.h"
+#include "utilities.h"
 
 #include <QtCore/qregularexpression.h>
 #include <stack>
@@ -268,9 +272,9 @@ void QDocForest::newPrimaryTree(const QString &module)
   title as a fallback if no higher-priority targets are found.
  */
 const Node *QDocForest::findNodeForTarget(QStringList &targetPath, const Node *relative,
-                                          Node::Genus genus, QString &ref)
+                                          Genus genus, QString &ref, int findFlags)
 {
-    int flags = SearchBaseClasses | SearchEnumValues;
+    int flags = SearchBaseClasses | SearchEnumValues | findFlags;
 
     QString entity = targetPath.takeFirst();
     QStringList entityPath = entity.split("::");
@@ -307,7 +311,7 @@ const Node *QDocForest::findNodeForTarget(QStringList &targetPath, const Node *r
  */
 const FunctionNode *QDocForest::findFunctionNode(const QStringList &path,
                                                  const Parameters &parameters, const Node *relative,
-                                                 Node::Genus genus)
+                                                 Genus genus)
 {
     for (const auto *tree : searchOrder()) {
         const FunctionNode *fn = tree->findFunctionNode(path, parameters, relative, genus);
@@ -346,9 +350,9 @@ NodeMultiMapMap QDocDatabase::s_newSinceMaps;
   write documentation for nodes marked \c internal.
 
   \a singleExec_ is false when qdoc is being used in the standard
-  way of running qdoc twices for each module, first with -prepare
-  and then with -generate. First the -prepare phase is run for
-  each module, then the -generate phase is run for each module.
+  way of running qdoc twices for each module, first with --prepare
+  and then with --generate. First the --prepare phase is run for
+  each module, then the --generate phase is run for each module.
 
   When \a singleExec_ is true, qdoc is run only once. During the
   single execution, qdoc processes the qdocconf files for all the
@@ -634,13 +638,18 @@ void QDocDatabase::initializeDB()
   If the QML module id is empty, looks up the QML type by
   \a name only.
  */
-QmlTypeNode *QDocDatabase::findQmlType(const QString &qmid, const QString &name)
+QmlTypeNode *QDocDatabase::findQmlType(const QString &qmid, const QString &name, const Node *relative)
 {
     if (!qmid.isEmpty()) {
-        if (auto *qcn = m_forest.lookupQmlType(qmid + u"::"_s + name); qcn)
+        if (auto *qcn = m_forest.lookupQmlType(qmid + u"::"_s + name, relative); qcn)
             return qcn;
     }
 
+    // Try unqualified lookup first (uses context-aware disambiguation)
+    if (auto *qcn = m_forest.lookupQmlType(name, relative); qcn)
+        return qcn;
+
+    // Fallback to path-based search
     QStringList path(name);
     return static_cast<QmlTypeNode *>(m_forest.findNodeByNameAndType(path, &Node::isQmlType));
 }
@@ -650,18 +659,24 @@ QmlTypeNode *QDocDatabase::findQmlType(const QString &qmid, const QString &name)
   constructed from the strings in the import \a record and the
   QML type \a name. Returns \c nullptr if no type was not found.
  */
-QmlTypeNode *QDocDatabase::findQmlType(const ImportRec &record, const QString &name)
+QmlTypeNode *QDocDatabase::findQmlType(const ImportRec &record, const QString &name, const Node *relative)
 {
-    if (!record.isEmpty()) {
-        const QString qmName = record.m_importUri.isEmpty() ?
-                record.m_moduleName : record.m_importUri;
-        const QStringList dotSplit{name.split(QLatin1Char('.'))};
-        for (const auto &namePart : dotSplit) {
-            if (auto *qcn = m_forest.lookupQmlType(qmName + u"::"_s + namePart); qcn)
-                return qcn;
-        }
+    if (record.isEmpty())
+        return nullptr;
+
+    QString type{name};
+
+    // If the import is under a namespace (id) and the type name is not prefixed with that id,
+    // then we know the type is not available under this import.
+    if (!record.m_importId.isEmpty()) {
+        const QString namespacePrefix{"%1."_L1.arg(record.m_importId)};
+        if (!type.startsWith(namespacePrefix))
+            return nullptr;
+        type.remove(0, namespacePrefix.size());
     }
-    return nullptr;
+
+    const QString qmName = record.m_importUri.isEmpty() ? record.m_moduleName : record.m_importUri;
+    return m_forest.lookupQmlType(qmName + u"::"_s + type, relative);
 }
 
 /*!
@@ -675,7 +690,7 @@ QmlTypeNode *QDocDatabase::findQmlTypeInPrimaryTree(const QString &qmid, const Q
 {
     if (!qmid.isEmpty())
         return primaryTree()->lookupQmlType(qmid + u"::"_s + name);
-    return static_cast<QmlTypeNode *>(primaryTreeRoot()->findChildNode(name, Node::QML, TypesOnly));
+    return static_cast<QmlTypeNode *>(primaryTreeRoot()->findChildNode(name, Genus::QML, TypesOnly));
 }
 
 /*!
@@ -850,6 +865,15 @@ void QDocDatabase::findAllLegaleseTexts(Aggregate *node)
  */
 
 /*!
+  \fn const CollectionNode *QDocDatabase::findConceptNode(const QString &name)
+
+  Non-creating, cross-tree lookup. findConcept()/findCollection() fabricate a
+  placeholder on a miss, which would shadow a dependency-module concept with an
+  empty primary-tree node and emit a dangling local href. getCollectionNode()
+  searches the same forest order without that side effect.
+ */
+
+/*!
   Find the \a key in the map of new class maps, and return a
   reference to the value, which is a NodeMap. If \a key is not
   found, return a reference to an empty NodeMap.
@@ -902,11 +926,13 @@ void QDocDatabase::resolveStuff()
         primaryTree()->markDontDocumentNodes();
         primaryTree()->removePrivateAndInternalBases(primaryTreeRoot());
         primaryTree()->resolveProperties();
+        primaryTree()->validatePropertyDocumentation(primaryTreeRoot());
         primaryTreeRoot()->markUndocumentedChildrenInternal();
         primaryTreeRoot()->resolveQmlInheritance();
         primaryTree()->resolveTargets(primaryTreeRoot());
         primaryTree()->resolveCppToQmlLinks();
         primaryTree()->resolveSince(*primaryTreeRoot());
+        resolveConceptUsers();
     }
     if (config.singleExec() && config.generating()) {
         primaryTree()->resolveBaseClasses(primaryTreeRoot());
@@ -914,6 +940,7 @@ void QDocDatabase::resolveStuff()
         primaryTreeRoot()->resolveQmlInheritance();
         primaryTree()->resolveCppToQmlLinks();
         primaryTree()->resolveSince(*primaryTreeRoot());
+        resolveConceptUsers();
     }
     if (!config.preparing()) {
         resolveNamespaces();
@@ -930,8 +957,89 @@ void QDocDatabase::resolveBaseClasses()
     Tree *t = m_forest.firstTree();
     while (t) {
         t->resolveBaseClasses(t->root());
+        if (t != primaryTree())
+            t->root()->resolveQmlInheritance();
         t = m_forest.nextTree();
     }
+}
+
+/*!
+  Gathers the fully-qualified concept names referenced by \a node.
+  Template-head and direct-concept references live on the optional
+  RelaxedTemplateDeclaration carried by the node; trailing-requires
+  and constrained-auto references are accumulated on the FunctionNode.
+ */
+static void collectConceptReferences(const Node *node, QStringList &refs)
+{
+    if (const auto &td = node->templateDecl(); td.has_value()) {
+        for (const auto &name : td->referenced_concepts)
+            refs.append(QString::fromStdString(name));
+    }
+    if (node->isFunction()) {
+        const auto *fn = static_cast<const FunctionNode *>(node);
+        refs += fn->referencedConcepts();
+    }
+}
+
+/*!
+  Walks every documented node under \a parent and registers each constrained
+  item as a member of the concept's CollectionNode for each concept it
+  references.
+
+  Recurses into aggregates so the entire primary tree is covered.
+ */
+static void registerConceptUsersUnder(Aggregate *parent, QDocDatabase &db)
+{
+    for (auto *child : std::as_const(parent->childNodes())) {
+        // A skipped node is not registered as a concept user, but its
+        // documented descendants still are: a documented class nested in an
+        // internal namespace, for example, should still appear in its concept's
+        // "Used by" list. Visibility filtering and recursion are therefore
+        // independent.
+        const bool registerChild =
+                !child->isPrivate() && !child->isInternal() && !child->isDontDocument();
+
+        if (registerChild) {
+            QStringList refs;
+            collectConceptReferences(child, refs);
+            refs.sort();
+            refs.removeDuplicates();
+
+            for (const QString &conceptName : std::as_const(refs)) {
+                // Cross-tree lookup. The forest search order covers the primary
+                // tree plus every dependency-module index tree. A concept
+                // declared in module B and referenced from module A can be
+                // found through the same cross-tree lookup machinery.
+                // Concepts without a \\concept block anywhere in the corpus
+                // return \c{nullptr} and are silently skipped; references to
+                // undocumented concepts (such as std::integral) are common and
+                // not actionable.
+                //
+                // addMember() deduplicates membership centrally, so re-running
+                // this pass is safe and produces a stable "Used by" listing
+                // without per-call guard logic.
+                if (auto *cn = db.findMutableCollectionNode(conceptName, NodeType::Concept))
+                    cn->addMember(child);
+            }
+        }
+
+        if (child->isAggregate())
+            registerConceptUsersUnder(static_cast<Aggregate *>(child), db);
+    }
+}
+
+/*!
+  Builds the concept-to-users reverse index after parsing finishes
+  and before any generator runs. The forward direction — which
+  concepts a constrained declaration references — is captured
+  during the libclang AST pass; this pass turns those isolated
+  references into bidirectional collection membership so concept
+  reference pages can render a \e {Used by} section through the
+  same scaffolding group and module collection pages already use.
+ */
+void QDocDatabase::resolveConceptUsers()
+{
+    registerConceptUsersUnder(primaryTreeRoot(), *this);
 }
 
 /*!
@@ -994,7 +1102,7 @@ void QDocDatabase::resolveNamespaces()
             } else if (!indexNamespace) {
                 // Warn about documented children in undocumented namespaces.
                 // As the namespace can be documented outside this project,
-                // skip the warning if -no-link-errors is set
+                // skip the warning if --no-link-errors is set
                 if (linkErrors) {
                     for (auto *node : namespaces) {
                         if (!node->isIndexNode())
@@ -1084,7 +1192,7 @@ void QDocDatabase::resolveProxies()
   The entire forest is searched, but the first match is accepted.
  */
 const FunctionNode *QDocDatabase::findFunctionNode(const QString &target, const Node *relative,
-                                                   Node::Genus genus)
+                                                   Genus genus)
 {
     QString signature;
     QString function = target;
@@ -1110,8 +1218,48 @@ const FunctionNode *QDocDatabase::findFunctionNode(const QString &target, const 
   When searching the index trees, the search begins at the
   root.
  */
-const Node *QDocDatabase::findTypeNode(const QString &type, const Node *relative, Node::Genus genus)
+const Node *QDocDatabase::findTypeNode(const QString &type, const Node *relative, Genus genus)
 {
+    // For QML contexts with qualified names containing ".", try import-aware lookup first
+    if ((genus == Genus::QML || (relative && relative->genus() == Genus::QML)) &&
+        type.contains('.') && !type.contains("::")) {
+        if (relative && relative->isQmlType()) {
+            const QmlTypeNode *qmlType = static_cast<const QmlTypeNode*>(relative);
+            const ImportList &imports = qmlType->importList();
+
+            for (const auto &import : imports) {
+                if (QmlTypeNode *found = findQmlType(import, type)) {
+                    return found;
+                }
+            }
+        }
+
+        // Fall back to regular path-based lookup for QML qualified names
+        QStringList path = type.split(".");
+        if ((path.size() == 1) && (path.at(0)[0].isLower() || path.at(0) == QString("T"))) {
+            auto it = s_typeNodeMap.find(path.at(0));
+            if (it != s_typeNodeMap.end())
+                return it.value();
+        }
+
+        // Try the full qualified path first
+        const Node *node = m_forest.findTypeNode(path, relative, genus);
+        if (node)
+            return node;
+
+        // If the full path fails and we have multiple segments, try just the last segment
+        // This handles cases like "TM.BaseType" where "TM" is an alias we can't resolve
+        // but "BaseType" might be findable as a QML type
+        if (path.size() > 1) {
+            const Node *lastSegmentNode = m_forest.findTypeNode(QStringList{path.last()}, relative, genus);
+            if (lastSegmentNode && lastSegmentNode->isQmlType())
+                return lastSegmentNode;
+        }
+
+        return nullptr;
+    }
+
+    // For C++ contexts or QML types with "::" notation, use C++ path splitting
     QStringList path = type.split("::");
     if ((path.size() == 1) && (path.at(0)[0].isLower() || path.at(0) == QString("T"))) {
         auto it = s_typeNodeMap.find(path.at(0));
@@ -1138,7 +1286,7 @@ const Node *QDocDatabase::findNodeForTarget(const QString &target, const Node *r
         QStringList path = target.split("::");
         int flags = SearchBaseClasses | SearchEnumValues;
         for (const auto *tree : searchOrder()) {
-            const Node *n = tree->findNode(path, relative, flags, Node::DontCare);
+            const Node *n = tree->findNode(path, relative, flags, Genus::DontCare);
             if (n)
                 return n;
             relative = nullptr;
@@ -1148,10 +1296,107 @@ const Node *QDocDatabase::findNodeForTarget(const QString &target, const Node *r
     return node;
 }
 
+/*!
+    Finds the node for \a target with genus and module scoping.
+
+    When \a moduleName is non-empty, the search is scoped to that
+    module's tree. Function signatures (targets ending with \c{()})
+    are parsed and dispatched to function-specific lookup. QML
+    dot-path targets are resolved via import-aware type lookup when
+    the \a genus is QML.
+
+    This overload extracts the dispatch logic from findNodeForAtom()
+    into a method that takes plain parameters instead of an Atom
+    pointer, enabling callers without Atom access (such as
+    LinkResolver) to use the same scoped lookup.
+*/
+const Node *QDocDatabase::findNodeForTarget(const QString &target, const Node *relative,
+                                            Genus genus, const QString &moduleName,
+                                            QString *ref)
+{
+    if (target.isEmpty())
+        return relative;
+
+    Tree *domain = moduleName.isEmpty() ? nullptr : findTree(moduleName);
+
+    if (domain) {
+        const Node *node = nullptr;
+        if (target.endsWith(".html"_L1)) {
+            node = domain->findNodeByNameAndType(QStringList(target), &Node::isPageNode);
+        } else if (target.endsWith(')'_L1)) {
+            QString function = target;
+            QString signature;
+            if (function.endsWith("()"_L1))
+                function.chop(2);
+            if (function.endsWith(')'_L1)) {
+                qsizetype position = function.lastIndexOf('('_L1);
+                signature = function.mid(position + 1, function.size() - position - 2);
+                function = function.left(position);
+            }
+            QStringList path = function.split("::"_L1);
+            node = domain->findFunctionNode(path, Parameters(signature), nullptr, genus);
+        }
+        if (node)
+            return node;
+
+        if (genus == Genus::QML && target.contains('.'_L1) && !target.contains("::"_L1)) {
+            int typeFlags = SearchBaseClasses | SearchEnumValues | TypesOnly;
+            QStringList path = target.split('.'_L1);
+            node = domain->findNode(path, relative, typeFlags, genus);
+            if (node)
+                return node;
+            if (path.size() > 1) {
+                node = domain->findNode(QStringList{path.last()}, relative, typeFlags, genus);
+                if (node && node->isQmlType())
+                    return node;
+            }
+        }
+
+        int flags = SearchBaseClasses | SearchEnumValues;
+        QStringList nodePath = target.split("::"_L1);
+        if (relative && relative->tree()->physicalModuleName() != domain->physicalModuleName())
+            relative = nullptr;
+        QString localRef;
+        const Node *result =
+                domain->findNodeForTarget(nodePath, {}, relative, flags, genus, localRef);
+        if (result && ref)
+            *ref = localRef;
+        return result;
+    }
+
+    // Forest-wide search: function signatures, QML dot-paths, then general.
+    if (target.endsWith(".html"_L1))
+        return findNodeByNameAndType(QStringList(target), &Node::isPageNode);
+
+    if (target.endsWith(')'_L1)) {
+        const Node *node = findFunctionNode(target, relative, genus);
+        if (node)
+            return node;
+    }
+
+    if (genus == Genus::QML && target.contains('.'_L1) && !target.contains("::"_L1)) {
+        const Node *node = findTypeNode(target, relative, genus);
+        if (node)
+            return node;
+    }
+
+    QStringList targetPath = Utilities::pathAndFragment(target);
+    int flags = SearchBaseClasses | SearchEnumValues;
+    QString localRef;
+    const Node *node = findNodeForTarget(targetPath, relative, genus, localRef, flags);
+    if (node) {
+        if (ref)
+            *ref = localRef;
+        return node;
+    }
+
+    return findPageNodeByTitle(target);
+}
+
 QStringList QDocDatabase::groupNamesForNode(Node *node)
 {
     QStringList result;
-    CNMap *m = primaryTree()->getCollectionMap(Node::Group);
+    CNMap *m = primaryTree()->getCollectionMap(NodeType::Group);
 
     if (!m)
         return result;
@@ -1180,16 +1425,31 @@ void QDocDatabase::readIndexes(const QStringList &indexFiles)
 }
 
 /*!
-  Generates a qdoc index file and write it to \a fileName. The
-  index file is generated with the parameters \a url and \a title,
-  using the generator \a g.
+  Generates a qdoc index file and writes it to \a fileName. The
+  index file is generated with the parameters \a url, \a title,
+  and \a hrefGenerator.
+
+  The \a hrefGenerator is used to compute document locations (hrefs)
+  for nodes. For index files, this should be the HTML generator
+  to ensure correct .html file extensions in the generated hrefs.
+  If null, defaults to the HTML generator.
  */
 void QDocDatabase::generateIndex(const QString &fileName, const QString &url, const QString &title,
-                                 Generator *g)
+                                 const Generator *hrefGenerator)
 {
+    // Resolve generator before modifying any state
+    const Generator *generator = hrefGenerator;
+    if (!generator)
+        generator = Generator::generatorForFormat(u"HTML"_s);
+    if (!generator) {
+        qCWarning(lcQdoc) << "Cannot generate index file: no href generator available"
+                             " (HTML generator missing)";
+        return;
+    }
+
     QString t = fileName.mid(fileName.lastIndexOf(QChar('/')) + 1);
     primaryTree()->setIndexFileName(t);
-    QDocIndexFiles::qdocIndexFiles()->generateIndex(fileName, url, title, g);
+    QDocIndexFiles::qdocIndexFiles()->generateIndex(fileName, url, title, generator);
     QDocIndexFiles::destroyQDocIndexFiles();
 }
 
@@ -1200,16 +1460,16 @@ void QDocDatabase::generateIndex(const QString &fileName, const QString &url, co
 */
 const CollectionNode *QDocDatabase::getModuleNode(const Node *relative)
 {
-    Node::NodeType moduleType{Node::Module};
+    NodeType moduleType{NodeType::Module};
     QString moduleName;
     switch (relative->genus())
     {
-    case Node::CPP:
-        moduleType = Node::Module;
+    case Genus::CPP:
+        moduleType = NodeType::Module;
         moduleName = relative->physicalModuleName();
         break;
-    case Node::QML:
-        moduleType = Node::QmlModule;
+    case Genus::QML:
+        moduleType = NodeType::QmlModule;
         moduleName = relative->logicalModuleName();
         break;
     default:
@@ -1226,7 +1486,7 @@ const CollectionNode *QDocDatabase::getModuleNode(const Node *relative)
   and merges them into the collection node map \a cnm. Nodes
   that match the \a relative node are not included.
  */
-void QDocDatabase::mergeCollections(Node::NodeType type, CNMap &cnm, const Node *relative)
+void QDocDatabase::mergeCollections(NodeType type, CNMap &cnm, const Node *relative)
 {
     cnm.clear();
     CNMultiMap cnmm;
@@ -1401,6 +1661,7 @@ void QDocDatabase::mergeCollections(CollectionNode *c)
                 c->markSeen();
                 c->setTitle(cn->title());
                 c->setUrl(cn->url());
+                c->setResolvedPhysicalModuleName(cn->tree()->physicalModuleName());
             }
         }
     }
@@ -1418,19 +1679,21 @@ void QDocDatabase::mergeCollections(CollectionNode *c)
   \a ref is also not valid.
  */
 const Node *QDocDatabase::findNodeForAtom(const Atom *a, const Node *relative, QString &ref,
-                                          Node::Genus genus)
+                                          Genus genus)
 {
     const Node *node = nullptr;
 
     Atom *atom = const_cast<Atom *>(a);
-    QStringList targetPath = atom->string().split(QLatin1Char('#'));
+    QStringList targetPath = Utilities::pathAndFragment(atom->string());
     QString first = targetPath.first().trimmed();
 
     Tree *domain = nullptr;
 
     if (atom->isLinkAtom()) {
-        domain = atom->domain();
-        genus = atom->genus();
+        if (auto *atomDomain = atom->domain())
+            domain = atomDomain;
+        if (atom->genus() != Genus::DontCare)
+            genus = atom->genus();
     }
 
     if (first.isEmpty())
@@ -1468,8 +1731,24 @@ const Node *QDocDatabase::findNodeForAtom(const Atom *a, const Node *relative, Q
             node = findNodeByNameAndType(QStringList(first), &Node::isPageNode);
         else if (first.endsWith(QChar(')')))
             node = findFunctionNode(first, relative, genus);
-        if (node == nullptr)
-            return findNodeForTarget(targetPath, relative, genus, ref);
+        if (node == nullptr) {
+            // For QML contexts with qualified names containing ".", use the same logic as findTypeNode
+            if (genus == Genus::QML && first.contains('.') && !first.contains("::")) {
+                // Try import-aware lookup using findTypeNode logic
+                node = findTypeNode(first, relative, genus);
+                if (node) {
+                    // Handle any fragment reference
+                    targetPath.removeFirst();
+                    if (!targetPath.isEmpty()) {
+                        ref = node->root()->tree()->getRef(targetPath.first(), node);
+                        if (ref.isEmpty())
+                            node = nullptr;
+                    }
+                    return node;
+                }
+            }
+            return findNodeForTarget(targetPath, relative, genus, ref, atom->flags());
+        }
     }
 
     if (node != nullptr && ref.isEmpty()) {
@@ -1530,7 +1809,7 @@ void QDocDatabase::updateNavigation()
 
             auto *atom = body.firstAtom();
 
-            std::pair<PageNode *, Atom *> prev { nullptr, nullptr };
+            std::pair<PageNode *, QString> prev { nullptr, QString() };
 
             std::stack<const PageNode *> tocStack;
             tocStack.push(inclusive ? tocPage : nullptr);
@@ -1639,8 +1918,7 @@ void QDocDatabase::updateNavigation()
                             page->setLink(
                                 Node::PreviousLink,
                                 prev.first->title(),
-                                // TODO: [possible-assertion-failure][imprecise-types][atoms-link]
-                                prev.second->linkText()
+                                prev.second
                             );
                         }
 
@@ -1661,9 +1939,45 @@ void QDocDatabase::updateNavigation()
                             tocStack.push(nullptr);
 
                         tocStack.push(page);
-                        prev = { page, atom };
+                        // TODO: [possible-assertion-failure][imprecise-types][atoms-link]
+                        prev = { page, atom->linkText() };
                     }
-                        break;
+                    break;
+
+                    case Atom::AnnotatedList:
+                    case Atom::GeneratedList: {
+                        if (const auto *cn = getCollectionNode(atom->string(), NodeType::Group)) {
+                            const auto sortOrder{Generator::sortOrder(atom->strings().last())};
+                            NodeList members{cn->members()};
+                            // Drop non-page nodes and index nodes so that we do not generate navigational
+                            // links pointing outside of this documentation set.
+                            members.erase(std::remove_if(members.begin(), members.end(),
+                                    [](const Node *n) {
+                                        return n->isIndexNode() || !n->isPageNode() || n->isExternalPage();
+                                    }), members.end());
+                            if (members.isEmpty())
+                                break;
+
+                            if (sortOrder == Qt::DescendingOrder)
+                                std::sort(members.rbegin(), members.rend(), Node::nodeSortKeyOrNameLessThan);
+                            else
+                                std::sort(members.begin(), members.end(), Node::nodeSortKeyOrNameLessThan);
+
+                            // `members` now has local PageNode pointers, adjust prev/next links for each.
+                            // Do not set a navigation parent node as group members use the group node as
+                            // their nav. parent.
+                            for (auto *m : members) {
+                                auto *page = static_cast<PageNode *>(m);
+                                if (prev.first) {
+                                    prev.first->setLink(Node::NextLink, page->title(), page->fullName());
+                                    page->setLink(Node::PreviousLink, prev.first->title(), prev.second);
+                                }
+                                prev = { page, page->fullName() };
+                            }
+                        }
+                    }
+                    break;
+
                     default:
                         break;
                 }

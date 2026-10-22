@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 // components/formeditor
 #include "formwindowmanager.h"
@@ -435,9 +436,8 @@ void FormWindowManager::setupActions()
     m_actionVerticalLayout->setEnabled(false);
     connect(m_actionVerticalLayout, &QAction::triggered, this, &FormWindowManager::createLayout);
 
-    QIcon formIcon = QIcon::fromTheme(u"designer-form-layout"_s,
-                                      createIconSet("editform.png"_L1));
-    m_actionFormLayout = new QAction(formIcon, tr("Lay Out in a &Form Layout"), this);
+    m_actionFormLayout = new QAction(createIconSet("editform.png"_L1),
+                                     tr("Lay Out in a &Form Layout"), this);
     m_actionFormLayout->setObjectName(u"__qt_form_layout_action"_s);
     m_actionFormLayout->setShortcut(Qt::CTRL | Qt::Key_6);
     m_actionFormLayout->setStatusTip(tr("Lays out the selected widgets in a form layout"));

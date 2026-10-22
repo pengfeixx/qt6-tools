@@ -16,7 +16,7 @@ class Tree;
 class NamespaceNode : public Aggregate
 {
 public:
-    NamespaceNode(Aggregate *parent, const QString &name) : Aggregate(Namespace, parent, name) {}
+    NamespaceNode(Aggregate *parent, const QString &name) : Aggregate(NodeType::Namespace, parent, name) {}
     ~NamespaceNode() override = default;
     [[nodiscard]] Tree *tree() const override { return (parent() ? parent()->tree() : m_tree); }
 
@@ -27,9 +27,10 @@ public:
     void setTree(Tree *t) { m_tree = t; }
     [[nodiscard]] const NodeList &includedChildren() const;
     void includeChild(Node *child);
+    // This will be used when we rely purely on the index for information.
+    [[nodiscard]] const QString &whereDocumented() const { return m_whereDocumented; }
     void setWhereDocumented(const QString &t) { m_whereDocumented = t; }
     [[nodiscard]] bool isDocumentedHere() const;
-    [[nodiscard]] bool hasDocumentedChildren() const;
     void reportDocumentedChildrenInUndocumentedNamespace() const;
     [[nodiscard]] bool docMustBeGenerated() const override;
     void setDocNode(NamespaceNode *ns) { m_docNode = ns; }

@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #ifndef QLONGLONGVALIDATOR_H
 #define QLONGLONGVALIDATOR_H
@@ -19,7 +20,7 @@ class QLongLongValidator : public QValidator
 public:
     explicit QLongLongValidator(QObject * parent);
     QLongLongValidator(qlonglong bottom, qlonglong top, QObject * parent);
-    ~QLongLongValidator();
+    ~QLongLongValidator() override;
 
     QValidator::State validate(QString &, int &) const override;
 
@@ -47,7 +48,7 @@ class QULongLongValidator : public QValidator
 public:
     explicit QULongLongValidator(QObject * parent);
     QULongLongValidator(qulonglong bottom, qulonglong top, QObject * parent);
-    ~QULongLongValidator();
+    ~QULongLongValidator() override;
 
     QValidator::State validate(QString &, int &) const override;
 

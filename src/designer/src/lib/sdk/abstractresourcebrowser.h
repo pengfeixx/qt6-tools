@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR GPL-3.0-only WITH Qt-GPL-exception-1.0
+// Qt-Security score:significant reason:default
 
 #ifndef ABSTRACTRESOURCEBROWSER_H
 #define ABSTRACTRESOURCEBROWSER_H
@@ -17,7 +18,7 @@ class QDESIGNER_SDK_EXPORT QDesignerResourceBrowserInterface : public QWidget
     Q_OBJECT
 public:
     explicit QDesignerResourceBrowserInterface(QWidget *parent = nullptr);
-    virtual ~QDesignerResourceBrowserInterface();
+    ~QDesignerResourceBrowserInterface() override;
 
     virtual void setCurrentPath(const QString &filePath) = 0;
     virtual QString currentPath() const = 0;

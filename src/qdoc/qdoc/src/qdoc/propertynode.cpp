@@ -17,7 +17,7 @@ QT_BEGIN_NAMESPACE
   The constructor sets the \a parent and the \a name, but
   everything else is left to default values.
  */
-PropertyNode::PropertyNode(Aggregate *parent, const QString &name) : Node(Property, parent, name)
+    PropertyNode::PropertyNode(Aggregate *parent, const QString &name) : Node(NodeType::Property, parent, name)
 {
     // nothing
 }
@@ -80,7 +80,7 @@ QString PropertyNode::qualifiedDataType() const
     if (m_propertyType != PropertyType::StandardProperty || m_type.startsWith(QLatin1String("const ")))
         return m_type;
 
-    if (setters().isEmpty() && resetters().isEmpty()) {
+    if (isConstant()) {
         if (m_type.contains(QLatin1Char('*')) || m_type.contains(QLatin1Char('&'))) {
             // 'QWidget *' becomes 'QWidget *' const
             return m_type + " const";

@@ -1,5 +1,6 @@
 // Copyright (C) 2016 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 //
 //  W A R N I N G
@@ -15,9 +16,10 @@
 #ifndef FONTPANEL_H
 #define FONTPANEL_H
 
-#include <QtWidgets/QGroupBox>
-#include <QtGui/QFont>
-#include <QtGui/QFontDatabase>
+#include <QtWidgets/qgroupbox.h>
+
+#include <QtGui/qfont.h>
+#include <QtGui/qfontdatabase.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -30,7 +32,7 @@ class FontPanel: public QGroupBox
 {
     Q_OBJECT
 public:
-    FontPanel(QWidget *parentWidget = 0);
+    explicit FontPanel(QWidget *parentWidget = nullptr);
 
     QFont selectedFont() const;
     void setSelectedFont(const QFont &);
@@ -61,7 +63,7 @@ private:
     QFontComboBox* m_familyComboBox;
     QComboBox *m_styleComboBox;
     QComboBox *m_pointSizeComboBox;
-    QTimer *m_previewFontUpdateTimer;
+    QTimer *m_previewFontUpdateTimer = nullptr;
 };
 
 QT_END_NAMESPACE

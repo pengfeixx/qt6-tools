@@ -8,10 +8,9 @@ usr/lib/${DEB_HOST_MULTIARCH}/qt6/examples/linguist/arrowpad/arrowpad
 usr/lib/${DEB_HOST_MULTIARCH}/qt6/examples/linguist/arrowpad/arrowpad_en.qm
 usr/lib/${DEB_HOST_MULTIARCH}/qt6/examples/linguist/arrowpad/arrowpad_fr.qm
 usr/lib/${DEB_HOST_MULTIARCH}/qt6/examples/linguist/arrowpad/arrowpad_nl.qm
-usr/lib/${DEB_HOST_MULTIARCH}/qt6/examples/linguist/hellotr/hellotr
-usr/lib/${DEB_HOST_MULTIARCH}/qt6/examples/linguist/hellotr/hellotr_en.qm
-usr/lib/${DEB_HOST_MULTIARCH}/qt6/examples/linguist/hellotr/hellotr_la.qm
-usr/lib/${DEB_HOST_MULTIARCH}/qt6/examples/linguist/i18n/i18n
+usr/lib/${DEB_HOST_MULTIARCH}/qt6/examples/linguist/localizedclock-idbased/localizedClockIdBased
+usr/lib/${DEB_HOST_MULTIARCH}/qt6/examples/linguist/localizedclock-switchlocale/localizedClockSwitchLocale
+usr/lib/${DEB_HOST_MULTIARCH}/qt6/examples/linguist/localizedclock/localizedClock
 usr/lib/${DEB_HOST_MULTIARCH}/qt6/examples/linguist/trollprint/trollprint
 usr/lib/${DEB_HOST_MULTIARCH}/qt6/examples/linguist/trollprint/trollprint_en.qm
 usr/lib/${DEB_HOST_MULTIARCH}/qt6/examples/linguist/trollprint/trollprint_pt.qm

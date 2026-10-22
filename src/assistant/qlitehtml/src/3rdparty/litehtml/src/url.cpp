@@ -29,12 +29,11 @@
 
 #include "url.h"
 
-#include <iostream>
 #include <sstream>
 #include <algorithm>
-
 #include "codepoint.h"
 #include "url_path.h"
+#include <iomanip>
 
 namespace litehtml {
 
@@ -95,35 +94,87 @@ url::url(const string& str)
     path_ = tmp;
 }
 
-url::url(const string& scheme,
-    const string& authority,
-    const string& path,
-    const string& query,
-    const string& fragment)
-: scheme_(scheme)
-, authority_(authority)
-, path_(path)
-, query_(query)
-, fragment_(fragment)
+url::url(const string& scheme, const string& authority, const string& path, const string& query,
+		 const string& fragment) :
+	scheme_(scheme),
+	authority_(authority),
+	path_(path),
+	query_(query),
+	fragment_(fragment)
 {
-    std::stringstream tss;
+	std::stringstream tss;
 
-    if (!scheme_.empty()) {
-        tss << scheme_ << ":";
-    }
-    if (!authority_.empty()) {
-        tss << "//" << authority_;
-    }
-    if (!path_.empty()) {
-        tss << path_;
-    }
-    if (!query_.empty()) {
-        tss << "?" << query_;
-    }
-    if (!fragment_.empty()) {
-        tss << "#" << fragment_;
-    }
-    str_ = tss.str();
+	if(!scheme_.empty())
+	{
+		tss << scheme_ << ":";
+	}
+	if(!authority_.empty())
+	{
+		tss << "//" << authority_;
+	}
+	if(!path_.empty())
+	{
+		tss << path_;
+	}
+	if(!query_.empty())
+	{
+		tss << "?" << query_;
+	}
+	if(!fragment_.empty())
+	{
+		tss << "#" << fragment_;
+	}
+	str_ = tss.str();
+}
+
+string url::encode(const string& str)
+{
+	std::ostringstream encoded;
+	encoded << std::hex << std::uppercase;
+
+	for(unsigned char c : str)
+	{
+		if(isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~')
+		{
+			encoded << c;
+		} else
+		{
+			encoded << '%' << std::setw(2) << int((unsigned char) c);
+		}
+	}
+
+	return encoded.str();
+}
+
+string url::decode(const string& str)
+{
+	string decoded;
+	size_t i = 0;
+
+	while(i < str.size())
+	{
+		char c = str[i];
+		if(c == '%')
+		{
+			if(i + 2 >= str.size())
+			{
+				break;
+			}
+
+			// Decode the percent-encoded character
+			char hex[3]	 = {str[i + 1], str[i + 2], '\0'};
+			c = static_cast<char>(std::strtol(hex, nullptr, 16));
+			i += 2; // Skip the next two characters
+		} else if(c == '+')
+		{
+			// Replace '+' with space
+			c = ' ';
+		}
+		decoded += c;
+		i++;
+	}
+
+	return decoded;
 }
 
 url resolve(const url& b, const url& r)
@@ -136,7 +187,7 @@ url resolve(const url& b, const url& r)
     if (r.has_scheme()) {
         return r;
     } else if (r.has_authority()) {
-        return url(b.scheme(), r.authority(), r.path(), r.query(), r.fragment());
+        return {b.scheme(), r.authority(), r.path(), r.query(), r.fragment()};
     } else if (r.has_path()) {
 
         // The relative URL path is either an absolute path or a relative
@@ -145,18 +196,18 @@ url resolve(const url& b, const url& r)
         // against the base path and build the URL using the resolved path.
 
         if (is_url_path_absolute(r.path())) {
-            return url(b.scheme(), b.authority(), r.path(), r.query(), r.fragment());
+            return {b.scheme(), b.authority(), r.path(), r.query(), r.fragment()};
         } else {
             string path = url_path_resolve(b.path(), r.path());
-            return url(b.scheme(), b.authority(), path, r.query(), r.fragment());
+            return {b.scheme(), b.authority(), path, r.query(), r.fragment()};
         }
 
     } else if (r.has_query()) {
-        return url(b.scheme(), b.authority(), b.path(), r.query(), r.fragment());
+        return {b.scheme(), b.authority(), b.path(), r.query(), r.fragment()};
     } else {
         // The resolved URL never includes the base URL fragment (i.e., it
         // always includes the reference URL fragment).
-        return url(b.scheme(), b.authority(), b.path(), b.query(), r.fragment());
+        return {b.scheme(), b.authority(), b.path(), b.query(), r.fragment()};
     }
 }
 

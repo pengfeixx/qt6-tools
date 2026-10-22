@@ -4,6 +4,8 @@
 #ifndef COLLECTIONNODE_H
 #define COLLECTIONNODE_H
 
+#include "genustypes.h"
+#include "status.h"
 #include "pagenode.h"
 
 #include <QtCore/qglobal.h>
@@ -22,11 +24,14 @@ public:
     [[nodiscard]] bool isCollectionNode() const override { return true; }
     [[nodiscard]] QString qtVariable() const override { return m_qtVariable; }
     void setQtVariable(const QString &v) override { m_qtVariable = v; }
-    [[nodiscard]] QString qtCMakeComponent() const override { return m_qtCMakeComponent; }
-    [[nodiscard]] QString qtCMakeTargetItem() const override { return m_qtCMakeTargetItem; }
-    void setQtCMakeComponent(const QString &target) override { m_qtCMakeComponent = target; }
-    void setQtCMakeTargetItem(const QString &target) override { m_qtCMakeTargetItem = target; }
+    [[nodiscard]] QString cmakePackage() const override { return m_cmakePackage; }
+    [[nodiscard]] QString cmakeComponent() const override { return m_cmakeComponent; }
+    [[nodiscard]] QString cmakeTargetItem() const override { return m_cmakeTargetItem; }
+    void setCMakePackage(const QString &package) override { m_cmakePackage = package; }
+    void setCMakeComponent(const QString &component) override { m_cmakeComponent = component; }
+    void setCMakeTargetItem(const QString &targetItem) override { m_cmakeTargetItem = targetItem; }
     void addMember(Node *node) override;
+    void setStatus(Status status) override;
     [[nodiscard]] bool hasNamespaces() const override;
     [[nodiscard]] bool hasClasses() const override;
     [[nodiscard]] bool wasSeen() const override { return m_seen; }
@@ -51,7 +56,7 @@ public:
         return result;
     }
 
-    NodeMap getMembers(Node::NodeType type) const
+    NodeMap getMembers(NodeType type) const
     {
         return getMembers([type](const Node *n) {
                     return n->nodeType() == type;
@@ -76,7 +81,14 @@ public:
     void markSeen() { m_seen = true; }
     void markNotSeen() { m_seen = false; }
 
+    [[nodiscard]] const QString &resolvedPhysicalModuleName() const
+    { return m_resolvedPhysicalModuleName; }
+    void setResolvedPhysicalModuleName(const QString &name)
+    { m_resolvedPhysicalModuleName = name; }
+
 private:
+    void setMemberStatus(Node *member);
+
     bool m_seen { false };
     // REMARK: This is set by the database when merging the collection
     // node and is later used to avoid merging the same collection
@@ -116,9 +128,11 @@ private:
     QString m_logicalModuleVersionMajor {};
     QString m_logicalModuleVersionMinor {};
     QString m_qtVariable {};
-    QString m_qtCMakeComponent {};
-    QString m_qtCMakeTargetItem {};
+    QString m_resolvedPhysicalModuleName {};
     QString m_state {};
+    QString m_cmakePackage = {};
+    QString m_cmakeComponent = {};
+    QString m_cmakeTargetItem = {};
 };
 
 QT_END_NAMESPACE

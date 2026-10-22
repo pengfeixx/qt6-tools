@@ -1,5 +1,6 @@
 // Copyright (C) 2020 The Qt Company Ltd.
 // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+// Qt-Security score:significant reason:default
 
 #ifndef QHELPFILTERSETTINGSWIDGET_H
 #define QHELPFILTERSETTINGSWIDGET_H
@@ -7,6 +8,8 @@
 #include <QtHelp/qhelp_global.h>
 
 #include <QtWidgets/qwidget.h>
+
+#include <memory>
 
 QT_BEGIN_NAMESPACE
 
@@ -30,7 +33,7 @@ public:
     bool applySettings(QHelpFilterEngine *filterEngine) const;
 
 private:
-    QScopedPointer<class QHelpFilterSettingsWidgetPrivate> d_ptr;
+    std::unique_ptr<class QHelpFilterSettingsWidgetPrivate> d_ptr;
     Q_DECLARE_PRIVATE(QHelpFilterSettingsWidget)
     Q_DISABLE_COPY_MOVE(QHelpFilterSettingsWidget)
 };

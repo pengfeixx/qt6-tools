@@ -12,6 +12,8 @@
 #include <private/qqmljsastvisitor_p.h>
 #include <private/qqmljsengine_p.h>
 
+#include <optional>
+
 QT_BEGIN_NAMESPACE
 
 class QmlMarkupVisitor : public QQmlJS::AST::Visitor
@@ -75,7 +77,7 @@ public:
     bool visit(QQmlJS::AST::NotExpression *) override;
     bool visit(QQmlJS::AST::BinaryExpression *) override;
     bool visit(QQmlJS::AST::ConditionalExpression *) override;
-    bool visit(QQmlJS::AST::Expression *) override;
+    bool visit(QQmlJS::AST::CommaExpression *) override;
 
     bool visit(QQmlJS::AST::Block *) override;
     void endVisit(QQmlJS::AST::Block *) override;
@@ -110,19 +112,18 @@ public:
     bool visit(QQmlJS::AST::FormalParameterList *) override;
     bool visit(QQmlJS::AST::DebuggerStatement *) override;
 
-protected:
-    QString protect(const QString &string);
-
 private:
     typedef QHash<QString, QString> StringHash;
     void addExtra(quint32 start, quint32 finish);
-    void addMarkedUpToken(QQmlJS::SourceLocation &location, const QString &text,
+    void addMarkedUpToken(const QQmlJS::SourceLocation &location, const QString &text,
                           const StringHash &attributes = StringHash());
     void addVerbatim(QQmlJS::SourceLocation first,
                      QQmlJS::SourceLocation last = QQmlJS::SourceLocation());
-    QString sourceText(QQmlJS::SourceLocation &location);
+    QString sourceText(const QQmlJS::SourceLocation &location);
     void throwRecursionDepthError() final;
-
+    std::optional<QQmlJS::SourceLocation>
+    getFullyQualifiedLocation(QQmlJS::AST::UiQualifiedId *id);
+    QQmlJS::SourceLocation getLocationForMarkup(QQmlJS::AST::UiQualifiedId *id);
     QQmlJS::Engine *m_engine { nullptr };
     QList<ExtraType> m_extraTypes {};
     QList<QQmlJS::SourceLocation> m_extraLocations {};

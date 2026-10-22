@@ -4,8 +4,9 @@
 #ifndef GENERATOR_H
 #define GENERATOR_H
 
+#include "ir/sorting.h"
+#include "outputproducer.h"
 #include "text.h"
-#include "utilities.h"
 #include "filesystem/fileresolver.h"
 
 #include <QtCore/qlist.h>
@@ -17,17 +18,24 @@
 
 QT_BEGIN_NAMESPACE
 
-typedef QMultiMap<QString, Node *> NodeMultiMap;
-
 class Aggregate;
+class ClassNode;
 class CodeMarker;
+class CollectionNode;
 class ExampleNode;
 class FunctionNode;
+class INode;
 class Location;
 class Node;
+class PageNode;
 class QDocDatabase;
+class QmlTypeNode;
 
-class Generator
+struct RelatedClass;
+
+typedef QMultiMap<QString, Node *> NodeMultiMap;
+
+class Generator : public OutputProducer
 {
 public:
     enum ListType { Generic, Obsolete };
@@ -37,28 +45,42 @@ public:
         PrivateSignal,
         QmlSignalHandler,
         AssociatedProperties,
-        BindableProperty
+        BindableProperty,
+        OverloadNote
+    };
+
+    enum class AdmonitionPrefix : unsigned char
+    {
+        None,
+        Note
     };
 
     Generator(FileResolver& file_resolver);
     virtual ~Generator();
 
+    void prepare() override { initializeGenerator(); }
+    void produce() override { generateDocs(); }
+    void finalize() override { terminateGenerator(); }
+
     virtual bool canHandleFormat(const QString &format) { return format == this->format(); }
-    virtual QString format() = 0;
+    [[nodiscard]] QString format() const override = 0;
+    [[nodiscard]] virtual QString fileExtension() const = 0;
     virtual void generateDocs();
     virtual void initializeGenerator();
     virtual void initializeFormat();
     virtual void terminateGenerator();
-    virtual QString typeString(const Node *node);
+    virtual QString typeString(const Node *node, bool plural = false);
 
-    QString fullDocumentLocation(const Node *node);
-    QString linkForExampleFile(const QString &path, const QString &fileExt = QString());
+    QString fullDocumentLocation(const Node *node) const;
+    QString linkForExampleFile(const QString &path, const QString &fileExt = QString()) const;
     static QString exampleFileTitle(const ExampleNode *relative, const QString &fileName);
     static Generator *currentGenerator() { return s_currentGenerator; }
+    static void setCurrentGenerator(Generator *generator) { s_currentGenerator = generator; }
     static Generator *generatorForFormat(const QString &format);
     static void initialize();
     static const QString &outputDir() { return s_outDir; }
     static const QString &outputSubdir() { return s_outSubdir; }
+    static const QString &imagesOutputDir() { return s_imagesOutDir; }
     static void terminate();
     static const QStringList &outputFileNames() { return s_outFileNames; }
     static bool noLinkErrors() { return s_noLinkErrors; }
@@ -73,11 +95,10 @@ public:
     virtual QString fileBase(const Node *node) const;
 
 protected:
-    static QFile *openSubPageFile(const Node *node, const QString &fileName);
-    void beginSubPage(const Node *node, const QString &fileName);
+    static QFile *openSubPageFile(const PageNode *node, const QString &fileName);
+    void beginSubPage(const PageNode *node, const QString &fileName);
     void endSubPage();
-    [[nodiscard]] virtual QString fileExtension() const = 0;
-    virtual void generateExampleFilePage(const Node *, ResolvedFile, CodeMarker * = nullptr) {}
+    virtual void generateExampleFilePage(const PageNode *, ResolvedFile, CodeMarker * = nullptr) {}
     virtual void generateAlsoList(const Node *node, CodeMarker *marker);
     virtual void generateAlsoList(const Node *node) { generateAlsoList(node, nullptr); }
     virtual qsizetype generateAtom(const Atom *, const Node *, CodeMarker *) { return 0; }
@@ -108,7 +129,7 @@ protected:
     QMap<QString, QString> &formattingRightMap();
     const Atom *generateAtomList(const Atom *atom, const Node *relative, CodeMarker *marker,
                                  bool generate, int &numGeneratedAtoms);
-    void generateEnumValuesForQmlProperty(const Node *node, CodeMarker *marker);
+    void generateEnumValuesForQmlReference(const Node *node, CodeMarker *marker);
     void generateRequiredLinks(const Node *node, CodeMarker *marker);
     void generateLinkToExample(const ExampleNode *en, CodeMarker *marker,
                                const QString &exampleUrl);
@@ -118,27 +139,29 @@ protected:
     void generateNoexceptNote(const Node *node, CodeMarker *marker);
     void generateStatus(const Node *node, CodeMarker *marker);
     virtual void generateAddendum(const Node *node, Addendum type, CodeMarker *marker,
-                                  bool generateNote);
+                                  AdmonitionPrefix prefix);
     virtual void generateAddendum(const Node *node, Addendum type, CodeMarker *marker)
     {
-        generateAddendum(node, type, marker, true);
+        generateAddendum(node, type, marker, AdmonitionPrefix::Note);
     };
     void generateThreadSafeness(const Node *node, CodeMarker *marker);
     bool generateComparisonCategory(const Node *node, CodeMarker *marker = nullptr);
-    bool generateComparisonList(const Node *node);
+    bool generateComparisonTable(const Node *node);
 
-    void generateOverloadedSignal(const Node *node, CodeMarker *marker);
-    static QString getOverloadedSignalCode(const Node *node);
+    QString generateOverloadSnippet(const FunctionNode *func);
+    QString generateObjectName(const QString &className);
+
     QString indent(int level, const QString &markedCode);
     QTextStream &out();
     QString outFileName();
     bool parseArg(const QString &src, const QString &tag, int *pos, int n, QStringView *contents,
                   QStringView *par1 = nullptr);
     void unknownAtom(const Atom *atom);
-    int appendSortedQmlNames(Text &text, const Node *base, const NodeList &subs);
+    int appendSortedQmlNames(Text &text, const Node *base, const QStringList &knownTypes,
+                             const QList<Node *> &subs);
 
-    static bool hasExceptions(const Node *node, NodeList &reentrant, NodeList &threadsafe,
-                              NodeList &nonreentrant);
+    static bool hasExceptions(const Node *node, QList<Node *> &reentrant, QList<Node *> &threadsafe,
+                              QList<Node *> &nonreentrant);
 
     QString naturalLanguage;
     QString tagFile_;
@@ -151,7 +174,7 @@ protected:
     int appendSortedNames(Text &text, const ClassNode *classe,
                           const QList<RelatedClass> &classes);
     void appendSignature(Text &text, const Node *node);
-    void signatureList(const NodeList &nodes, const Node *relative, CodeMarker *marker);
+    void signatureList(const QList<Node *> &nodes, const Node *relative, CodeMarker *marker);
 
     void addImageToCopy(const ExampleNode *en, const ResolvedFile& resolved_file);
     // TODO: This seems to be used as the predicate in std::sort calls.
@@ -161,11 +184,17 @@ protected:
     // provided.
     static bool comparePaths(const QString &a, const QString &b) { return (a < b); }
     static bool appendTrademark(const Atom *atom);
+    static std::optional<std::pair<QString, QString>> cmakeRequisite(const CollectionNode *cn);
 
+public:
     static Qt::SortOrder sortOrder(const QString &str)
     {
-        return (str == "descending") ? Qt::DescendingOrder : Qt::AscendingOrder;
+        return Sorting::parseSortOrder(str);
     }
+
+    static void addNodeLink(Text &text, const QString &nodeRef, const QString &linkText);
+    static void addNodeLink(Text &text, const INode *node, const QString &linkText = QString());
+
 
 private:
     static Generator *s_currentGenerator;
@@ -174,6 +203,7 @@ private:
     static QList<Generator *> s_generators;
     static QString s_project;
     static QString s_outDir;
+    static QString s_imagesOutDir;
     static QString s_outSubdir;
     static QStringList s_outFileNames;
     static QSet<QString> s_outputFormats;
@@ -182,7 +212,6 @@ private:
     static QHash<QString, QString> s_outputSuffixes;
     static bool s_noLinkErrors;
     static bool s_autolinkErrors;
-    static bool s_redirectDocumentationToDevNull;
     static bool s_useOutputSubdirs;
     static QmlTypeNode *s_qmlTypeContext;
 
@@ -190,6 +219,7 @@ private:
     static void copyTemplateFiles(const QString &configVar, const QString &subDir);
 
 protected:
+    static bool s_redirectDocumentationToDevNull;
     FileResolver& file_resolver;
 
     QDocDatabase *m_qdb { nullptr };
@@ -198,7 +228,6 @@ protected:
     bool m_inSectionHeading { false };
     bool m_inTableHeader { false };
     bool m_threeColumnEnumValueTable { true };
-    bool m_showInternal { false };
     bool m_quoting { false };
     int m_numTableRows { 0 };
     QString m_link {};

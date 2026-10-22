@@ -3,7 +3,7 @@
 
 #include "qdoccommandlineparser.h"
 
-#include "utilities.h"
+#include "qdoclogging.h"
 
 #include <QtCore/qdebug.h>
 #include <QtCore/qfile.h>
@@ -150,12 +150,16 @@ static QStringList argumentsFromCommandLineAndFile(const QStringList &arguments)
         if (argument.startsWith(QLatin1Char('@'))) {
             QString optionsFile = argument;
             optionsFile.remove(0, 1);
-            if (optionsFile.isEmpty())
-                qFatal("The @ option requires an input file");
+            if (optionsFile.isEmpty()) {
+                qWarning("The @ option requires an input file");
+                continue;
+            }
             QFile f(optionsFile);
-            if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
-                qFatal("Cannot open options file specified with @: %ls",
+            if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                qWarning("Cannot open options file specified with @: %ls",
                        qUtf16Printable(optionsFile));
+                continue;
+            }
             while (!f.atEnd()) {
                 QString line = QString::fromLocal8Bit(f.readLine().trimmed());
                 if (!line.isEmpty())
@@ -174,5 +178,5 @@ void QDocCommandLineParser::process(const QStringList &arguments)
     QCommandLineParser::process(allArguments);
 
     if (isSet(singleExecOption) && isSet(indexDirOption))
-        qCWarning(lcQdoc) << "Warning: -indexdir option ignored: Index files are not used in single-exec mode.";
+        qCWarning(lcQdoc) << "Warning: --indexdir option ignored: Index files are not used in single-exec mode.";
 }

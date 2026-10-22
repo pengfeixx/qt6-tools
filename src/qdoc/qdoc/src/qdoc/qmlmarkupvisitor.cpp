@@ -3,11 +3,16 @@
 
 #include "qmlmarkupvisitor.h"
 
+#include "utilities.h"
+#include "textutils.h"
+
 #include <QtCore/qglobal.h>
 #include <QtCore/qstringlist.h>
 
 #include <private/qqmljsast_p.h>
 #include <private/qqmljsengine_p.h>
+
+using namespace Qt::StringLiterals;
 
 QT_BEGIN_NAMESPACE
 
@@ -50,40 +55,6 @@ QmlMarkupVisitor::QmlMarkupVisitor(const QString &source,
     }
 }
 
-// The protect() function is a copy of the one from CppCodeMarker.
-
-static const QString samp = QLatin1String("&amp;");
-static const QString slt = QLatin1String("&lt;");
-static const QString sgt = QLatin1String("&gt;");
-static const QString squot = QLatin1String("&quot;");
-
-QString QmlMarkupVisitor::protect(const QString &str)
-{
-    qsizetype n = str.size();
-    QString marked;
-    marked.reserve(n * 2 + 30);
-    const QChar *data = str.constData();
-    for (int i = 0; i != n; ++i) {
-        switch (data[i].unicode()) {
-        case '&':
-            marked += samp;
-            break;
-        case '<':
-            marked += slt;
-            break;
-        case '>':
-            marked += sgt;
-            break;
-        case '"':
-            marked += squot;
-            break;
-        default:
-            marked += data[i];
-        }
-    }
-    return marked;
-}
-
 QString QmlMarkupVisitor::markedUpCode()
 {
     if (int(m_cursor) < m_source.size())
@@ -104,7 +75,7 @@ void QmlMarkupVisitor::addExtra(quint32 start, quint32 finish)
         if (extra.trimmed().isEmpty())
             m_output += extra;
         else
-            m_output += protect(extra); // text that should probably have been caught by the parser
+            m_output += TextUtils::protect(extra); // text that should probably have been caught by the parser
 
         m_cursor = finish;
         return;
@@ -126,19 +97,19 @@ void QmlMarkupVisitor::addExtra(quint32 start, quint32 finish)
         quint32 j = m_extraLocations[m_extraIndex].offset - 2;
         if (i <= j && j < finish) {
             if (i < j)
-                m_output += protect(m_source.mid(i, j - i));
+                m_output += TextUtils::protect(m_source.mid(i, j - i));
 
             quint32 l = m_extraLocations[m_extraIndex].length;
             if (m_extraTypes[m_extraIndex] == Comment) {
-                if (m_source.mid(j, 2) == QLatin1String("/*"))
+                if (m_source.mid(j, 2) == "/*"_L1)
                     l += 4;
                 else
                     l += 2;
-                m_output += QLatin1String("<@comment>");
-                m_output += protect(m_source.mid(j, l));
-                m_output += QLatin1String("</@comment>");
+                m_output += "<@comment>"_L1;
+                m_output += TextUtils::protect(m_source.mid(j, l));
+                m_output += "</@comment>"_L1;
             } else
-                m_output += protect(m_source.mid(j, l));
+                m_output += TextUtils::protect(m_source.mid(j, l));
 
             m_extraIndex++;
             i = j + l;
@@ -150,12 +121,12 @@ void QmlMarkupVisitor::addExtra(quint32 start, quint32 finish)
     if (extra.trimmed().isEmpty())
         m_output += extra;
     else
-        m_output += protect(extra); // text that should probably have been caught by the parser
+        m_output += TextUtils::protect(extra); // text that should probably have been caught by the parser
 
     m_cursor = finish;
 }
 
-void QmlMarkupVisitor::addMarkedUpToken(QQmlJS::SourceLocation &location,
+void QmlMarkupVisitor::addMarkedUpToken(const QQmlJS::SourceLocation &location,
                                         const QString &tagName,
                                         const QHash<QString, QString> &attributes)
 {
@@ -167,16 +138,57 @@ void QmlMarkupVisitor::addMarkedUpToken(QQmlJS::SourceLocation &location,
     else if (m_cursor > location.offset)
         return;
 
-    m_output += QString(QLatin1String("<@%1")).arg(tagName);
+    m_output += "<@%1"_L1.arg(tagName);
     for (const auto &key : attributes)
-        m_output += QString(QLatin1String(" %1=\"%2\"")).arg(key, attributes[key]);
-    m_output += QString(QLatin1String(">%2</@%3>")).arg(protect(sourceText(location)), tagName);
+        m_output += " %1=\"%2\""_L1.arg(key, attributes[key]);
+    m_output += ">%2</@%3>"_L1.arg(TextUtils::protect(sourceText(location)), tagName);
     m_cursor += location.length;
 }
 
-QString QmlMarkupVisitor::sourceText(QQmlJS::SourceLocation &location)
+QString QmlMarkupVisitor::sourceText(const QQmlJS::SourceLocation &location)
 {
     return m_source.mid(location.offset, location.length);
+}
+
+/*!
+  Returns a SourceLocation spanning the entire qualified \a id.
+
+  For a qualified identifier like \c {TM.BaseType} or \c
+  {Layout.preferredWidth}, returns a location that covers all segments including
+  dots.
+
+  Returns std::nullopt if \a id is \nullptr or has no valid tokens.
+ */
+std::optional<QQmlJS::SourceLocation>
+QmlMarkupVisitor::getFullyQualifiedLocation(QQmlJS::AST::UiQualifiedId *id) {
+    if (!id || !id->identifierToken.isValid())
+        return std::nullopt;
+
+    auto location = id->identifierToken;
+
+    for (auto current = id->next; current; current = current->next) {
+        if (!current->identifierToken.isValid())
+            continue;
+
+        const auto currentEnd =  current->identifierToken.offset + current->identifierToken.length;
+        location.length = currentEnd - location.offset;
+    }
+
+    return location;
+}
+
+/*!
+  Returns a source location suitable for markup of qualified \a id.
+
+  Attempts to span the entire qualified identifier if possible,
+  otherwise falls back to just the first token.
+ */
+QQmlJS::SourceLocation
+QmlMarkupVisitor::getLocationForMarkup(QQmlJS::AST::UiQualifiedId *id)
+{
+    if (auto fullLocation = getFullyQualifiedLocation(id))
+        return fullLocation.value();
+    return id->identifierToken;
 }
 
 void QmlMarkupVisitor::addVerbatim(QQmlJS::SourceLocation first,
@@ -198,7 +210,7 @@ void QmlMarkupVisitor::addVerbatim(QQmlJS::SourceLocation first,
         return;
 
     QString text = m_source.mid(start, finish - start);
-    m_output += protect(text);
+    m_output += TextUtils::protect(text);
     m_cursor = finish;
 }
 
@@ -206,7 +218,7 @@ bool QmlMarkupVisitor::visit(QQmlJS::AST::UiImport *uiimport)
 {
     addVerbatim(uiimport->importToken);
     if (!uiimport->importUri)
-        addMarkedUpToken(uiimport->fileNameToken, QLatin1String("headerfile"));
+        addMarkedUpToken(uiimport->fileNameToken, "headerfile"_L1);
     return false;
 }
 
@@ -216,7 +228,7 @@ void QmlMarkupVisitor::endVisit(QQmlJS::AST::UiImport *uiimport)
         addVerbatim(uiimport->version->firstSourceLocation(),
                     uiimport->version->lastSourceLocation());
     addVerbatim(uiimport->asToken);
-    addMarkedUpToken(uiimport->importIdToken, QLatin1String("headerfile"));
+    addMarkedUpToken(uiimport->importIdToken, "headerfile"_L1);
     addVerbatim(uiimport->semicolonToken);
 }
 
@@ -227,8 +239,8 @@ bool QmlMarkupVisitor::visit(QQmlJS::AST::UiPublicMember *member)
         addVerbatim(member->readonlyToken());
         addVerbatim(member->propertyToken());
         addVerbatim(member->typeModifierToken);
-        addMarkedUpToken(member->typeToken, QLatin1String("type"));
-        addMarkedUpToken(member->identifierToken, QLatin1String("name"));
+        addMarkedUpToken(member->typeToken, "type"_L1);
+        addMarkedUpToken(member->identifierToken, "name"_L1);
         addVerbatim(member->colonToken);
         if (member->binding)
             QQmlJS::AST::Node::accept(member->binding, this);
@@ -237,7 +249,7 @@ bool QmlMarkupVisitor::visit(QQmlJS::AST::UiPublicMember *member)
     } else {
         addVerbatim(member->propertyToken());
         addVerbatim(member->typeModifierToken);
-        addMarkedUpToken(member->typeToken, QLatin1String("type"));
+        addMarkedUpToken(member->typeToken, "type"_L1);
         // addVerbatim(member->identifierToken());
         QQmlJS::AST::Node::accept(member->parameters, this);
     }
@@ -260,7 +272,11 @@ bool QmlMarkupVisitor::visit(QQmlJS::AST::UiObjectBinding *binding)
 {
     QQmlJS::AST::Node::accept(binding->qualifiedId, this);
     addVerbatim(binding->colonToken);
-    QQmlJS::AST::Node::accept(binding->qualifiedTypeNameId, this);
+    if (auto fullLocation = getFullyQualifiedLocation(binding->qualifiedTypeNameId))
+        addMarkedUpToken(fullLocation.value(), "type"_L1);
+    else
+        QQmlJS::AST::Node::accept(binding->qualifiedTypeNameId, this);
+
     QQmlJS::AST::Node::accept(binding->initializer, this);
     return false;
 }
@@ -294,7 +310,7 @@ bool QmlMarkupVisitor::visit(QQmlJS::AST::UiArrayMemberList *list)
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::UiQualifiedId *id)
 {
-    addMarkedUpToken(id->identifierToken, QLatin1String("name"));
+    addMarkedUpToken(getLocationForMarkup(id), "name"_L1);
     return false;
 }
 
@@ -306,37 +322,37 @@ bool QmlMarkupVisitor::visit(QQmlJS::AST::ThisExpression *expression)
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::IdentifierExpression *identifier)
 {
-    addMarkedUpToken(identifier->identifierToken, QLatin1String("name"));
+    addMarkedUpToken(identifier->identifierToken, "name"_L1);
     return false;
 }
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::NullExpression *null)
 {
-    addMarkedUpToken(null->nullToken, QLatin1String("number"));
+    addMarkedUpToken(null->nullToken, "number"_L1);
     return true;
 }
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::TrueLiteral *literal)
 {
-    addMarkedUpToken(literal->trueToken, QLatin1String("number"));
+    addMarkedUpToken(literal->trueToken, "number"_L1);
     return true;
 }
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::FalseLiteral *literal)
 {
-    addMarkedUpToken(literal->falseToken, QLatin1String("number"));
+    addMarkedUpToken(literal->falseToken, "number"_L1);
     return true;
 }
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::NumericLiteral *literal)
 {
-    addMarkedUpToken(literal->literalToken, QLatin1String("number"));
+    addMarkedUpToken(literal->literalToken, "number"_L1);
     return false;
 }
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::StringLiteral *literal)
 {
-    addMarkedUpToken(literal->literalToken, QLatin1String("string"));
+    addMarkedUpToken(literal->literalToken, "string"_L1);
     return true;
 }
 
@@ -403,7 +419,7 @@ bool QmlMarkupVisitor::visit(QQmlJS::AST::FieldMemberExpression *expression)
 {
     QQmlJS::AST::Node::accept(expression->base, this);
     addVerbatim(expression->dotToken);
-    addMarkedUpToken(expression->identifierToken, QLatin1String("name"));
+    addMarkedUpToken(expression->identifierToken, "name"_L1);
     return false;
 }
 
@@ -498,7 +514,7 @@ bool QmlMarkupVisitor::visit(QQmlJS::AST::NotExpression *expression)
 bool QmlMarkupVisitor::visit(QQmlJS::AST::BinaryExpression *expression)
 {
     QQmlJS::AST::Node::accept(expression->left, this);
-    addMarkedUpToken(expression->operatorToken, QLatin1String("op"));
+    addMarkedUpToken(expression->operatorToken, "op"_L1);
     QQmlJS::AST::Node::accept(expression->right, this);
     return false;
 }
@@ -513,7 +529,7 @@ bool QmlMarkupVisitor::visit(QQmlJS::AST::ConditionalExpression *expression)
     return false;
 }
 
-bool QmlMarkupVisitor::visit(QQmlJS::AST::Expression *expression)
+bool QmlMarkupVisitor::visit(QQmlJS::AST::CommaExpression *expression)
 {
     QQmlJS::AST::Node::accept(expression->left, this);
     addVerbatim(expression->commaToken);
@@ -564,13 +580,13 @@ bool QmlMarkupVisitor::visit(QQmlJS::AST::ExpressionStatement *statement)
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::IfStatement *statement)
 {
-    addMarkedUpToken(statement->ifToken, QLatin1String("keyword"));
+    addMarkedUpToken(statement->ifToken, "keyword"_L1);
     addVerbatim(statement->lparenToken);
     QQmlJS::AST::Node::accept(statement->expression, this);
     addVerbatim(statement->rparenToken);
     QQmlJS::AST::Node::accept(statement->ok, this);
     if (statement->ko) {
-        addMarkedUpToken(statement->elseToken, QLatin1String("keyword"));
+        addMarkedUpToken(statement->elseToken, "keyword"_L1);
         QQmlJS::AST::Node::accept(statement->ko, this);
     }
     return false;
@@ -578,9 +594,9 @@ bool QmlMarkupVisitor::visit(QQmlJS::AST::IfStatement *statement)
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::DoWhileStatement *statement)
 {
-    addMarkedUpToken(statement->doToken, QLatin1String("keyword"));
+    addMarkedUpToken(statement->doToken, "keyword"_L1);
     QQmlJS::AST::Node::accept(statement->statement, this);
-    addMarkedUpToken(statement->whileToken, QLatin1String("keyword"));
+    addMarkedUpToken(statement->whileToken, "keyword"_L1);
     addVerbatim(statement->lparenToken);
     QQmlJS::AST::Node::accept(statement->expression, this);
     addVerbatim(statement->rparenToken);
@@ -590,7 +606,7 @@ bool QmlMarkupVisitor::visit(QQmlJS::AST::DoWhileStatement *statement)
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::WhileStatement *statement)
 {
-    addMarkedUpToken(statement->whileToken, QLatin1String("keyword"));
+    addMarkedUpToken(statement->whileToken, "keyword"_L1);
     addVerbatim(statement->lparenToken);
     QQmlJS::AST::Node::accept(statement->expression, this);
     addVerbatim(statement->rparenToken);
@@ -600,7 +616,7 @@ bool QmlMarkupVisitor::visit(QQmlJS::AST::WhileStatement *statement)
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::ForStatement *statement)
 {
-    addMarkedUpToken(statement->forToken, QLatin1String("keyword"));
+    addMarkedUpToken(statement->forToken, "keyword"_L1);
     addVerbatim(statement->lparenToken);
     QQmlJS::AST::Node::accept(statement->initialiser, this);
     addVerbatim(statement->firstSemicolonToken);
@@ -614,7 +630,7 @@ bool QmlMarkupVisitor::visit(QQmlJS::AST::ForStatement *statement)
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::ForEachStatement *statement)
 {
-    addMarkedUpToken(statement->forToken, QLatin1String("keyword"));
+    addMarkedUpToken(statement->forToken, "keyword"_L1);
     addVerbatim(statement->lparenToken);
     QQmlJS::AST::Node::accept(statement->lhs, this);
     addVerbatim(statement->inOfToken);
@@ -626,23 +642,23 @@ bool QmlMarkupVisitor::visit(QQmlJS::AST::ForEachStatement *statement)
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::ContinueStatement *statement)
 {
-    addMarkedUpToken(statement->continueToken, QLatin1String("keyword"));
-    addMarkedUpToken(statement->identifierToken, QLatin1String("name"));
+    addMarkedUpToken(statement->continueToken, "keyword"_L1);
+    addMarkedUpToken(statement->identifierToken, "name"_L1);
     addVerbatim(statement->semicolonToken);
     return false;
 }
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::BreakStatement *statement)
 {
-    addMarkedUpToken(statement->breakToken, QLatin1String("keyword"));
-    addMarkedUpToken(statement->identifierToken, QLatin1String("name"));
+    addMarkedUpToken(statement->breakToken, "keyword"_L1);
+    addMarkedUpToken(statement->identifierToken, "name"_L1);
     addVerbatim(statement->semicolonToken);
     return false;
 }
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::ReturnStatement *statement)
 {
-    addMarkedUpToken(statement->returnToken, QLatin1String("keyword"));
+    addMarkedUpToken(statement->returnToken, "keyword"_L1);
     QQmlJS::AST::Node::accept(statement->expression, this);
     addVerbatim(statement->semicolonToken);
     return false;
@@ -650,7 +666,7 @@ bool QmlMarkupVisitor::visit(QQmlJS::AST::ReturnStatement *statement)
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::WithStatement *statement)
 {
-    addMarkedUpToken(statement->withToken, QLatin1String("keyword"));
+    addMarkedUpToken(statement->withToken, "keyword"_L1);
     addVerbatim(statement->lparenToken);
     QQmlJS::AST::Node::accept(statement->expression, this);
     addVerbatim(statement->rparenToken);
@@ -671,7 +687,7 @@ void QmlMarkupVisitor::endVisit(QQmlJS::AST::CaseBlock *block)
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::SwitchStatement *statement)
 {
-    addMarkedUpToken(statement->switchToken, QLatin1String("keyword"));
+    addMarkedUpToken(statement->switchToken, "keyword"_L1);
     addVerbatim(statement->lparenToken);
     QQmlJS::AST::Node::accept(statement->expression, this);
     addVerbatim(statement->rparenToken);
@@ -681,7 +697,7 @@ bool QmlMarkupVisitor::visit(QQmlJS::AST::SwitchStatement *statement)
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::CaseClause *clause)
 {
-    addMarkedUpToken(clause->caseToken, QLatin1String("keyword"));
+    addMarkedUpToken(clause->caseToken, "keyword"_L1);
     QQmlJS::AST::Node::accept(clause->expression, this);
     addVerbatim(clause->colonToken);
     QQmlJS::AST::Node::accept(clause->statements, this);
@@ -690,14 +706,14 @@ bool QmlMarkupVisitor::visit(QQmlJS::AST::CaseClause *clause)
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::DefaultClause *clause)
 {
-    addMarkedUpToken(clause->defaultToken, QLatin1String("keyword"));
+    addMarkedUpToken(clause->defaultToken, "keyword"_L1);
     addVerbatim(clause->colonToken, clause->colonToken);
     return true;
 }
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::LabelledStatement *statement)
 {
-    addMarkedUpToken(statement->identifierToken, QLatin1String("name"));
+    addMarkedUpToken(statement->identifierToken, "name"_L1);
     addVerbatim(statement->colonToken);
     QQmlJS::AST::Node::accept(statement->statement, this);
     return false;
@@ -705,7 +721,7 @@ bool QmlMarkupVisitor::visit(QQmlJS::AST::LabelledStatement *statement)
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::ThrowStatement *statement)
 {
-    addMarkedUpToken(statement->throwToken, QLatin1String("keyword"));
+    addMarkedUpToken(statement->throwToken, "keyword"_L1);
     QQmlJS::AST::Node::accept(statement->expression, this);
     addVerbatim(statement->semicolonToken);
     return false;
@@ -713,23 +729,23 @@ bool QmlMarkupVisitor::visit(QQmlJS::AST::ThrowStatement *statement)
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::Catch *c)
 {
-    addMarkedUpToken(c->catchToken, QLatin1String("keyword"));
+    addMarkedUpToken(c->catchToken, "keyword"_L1);
     addVerbatim(c->lparenToken);
-    addMarkedUpToken(c->identifierToken, QLatin1String("name"));
+    addMarkedUpToken(c->identifierToken, "name"_L1);
     addVerbatim(c->rparenToken);
     return false;
 }
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::Finally *f)
 {
-    addMarkedUpToken(f->finallyToken, QLatin1String("keyword"));
+    addMarkedUpToken(f->finallyToken, "keyword"_L1);
     QQmlJS::AST::Node::accept(f->statement, this);
     return false;
 }
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::TryStatement *statement)
 {
-    addMarkedUpToken(statement->tryToken, QLatin1String("keyword"));
+    addMarkedUpToken(statement->tryToken, "keyword"_L1);
     QQmlJS::AST::Node::accept(statement->statement, this);
     QQmlJS::AST::Node::accept(statement->catchExpression, this);
     QQmlJS::AST::Node::accept(statement->finallyExpression, this);
@@ -738,8 +754,8 @@ bool QmlMarkupVisitor::visit(QQmlJS::AST::TryStatement *statement)
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::FunctionExpression *expression)
 {
-    addMarkedUpToken(expression->functionToken, QLatin1String("keyword"));
-    addMarkedUpToken(expression->identifierToken, QLatin1String("name"));
+    addMarkedUpToken(expression->functionToken, "keyword"_L1);
+    addMarkedUpToken(expression->identifierToken, "name"_L1);
     addVerbatim(expression->lparenToken);
     QQmlJS::AST::Node::accept(expression->formals, this);
     addVerbatim(expression->rparenToken);
@@ -751,8 +767,8 @@ bool QmlMarkupVisitor::visit(QQmlJS::AST::FunctionExpression *expression)
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::FunctionDeclaration *declaration)
 {
-    addMarkedUpToken(declaration->functionToken, QLatin1String("keyword"));
-    addMarkedUpToken(declaration->identifierToken, QLatin1String("name"));
+    addMarkedUpToken(declaration->functionToken, "keyword"_L1);
+    addMarkedUpToken(declaration->identifierToken, "name"_L1);
     addVerbatim(declaration->lparenToken);
     QQmlJS::AST::Node::accept(declaration->formals, this);
     addVerbatim(declaration->rparenToken);
@@ -764,9 +780,7 @@ bool QmlMarkupVisitor::visit(QQmlJS::AST::FunctionDeclaration *declaration)
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::FormalParameterList *list)
 {
-    //    addVerbatim(list->commaToken);
     QQmlJS::AST::Node::accept(list->element, this);
-    // addMarkedUpToken(list->identifierToken, QLatin1String("name"));
     return false;
 }
 
@@ -781,7 +795,11 @@ bool QmlMarkupVisitor::visit(QQmlJS::AST::DebuggerStatement *statement)
 
 bool QmlMarkupVisitor::visit(QQmlJS::AST::UiObjectDefinition *definition)
 {
-    addMarkedUpToken(definition->qualifiedTypeNameId->identifierToken, QLatin1String("type"));
+    if (auto fullLocation = getFullyQualifiedLocation(definition->qualifiedTypeNameId))
+        addMarkedUpToken(fullLocation.value(), "type"_L1);
+    else
+        QQmlJS::AST::Node::accept(definition->qualifiedTypeNameId, this);
+
     QQmlJS::AST::Node::accept(definition->initializer, this);
     return false;
 }
